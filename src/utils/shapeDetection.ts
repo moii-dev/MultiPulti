@@ -1,23 +1,6 @@
-export interface Point {
-  x: number;
-  y: number;
-}
+import type { Point, SmartShape } from "../types/editor";
 
-export type SmartShape =
-  | {
-      type: "ellipse";
-      cx: number;
-      cy: number;
-      rx: number;
-      ry: number;
-    }
-  | {
-      type: "line";
-      x1: number;
-      y1: number;
-      x2: number;
-      y2: number;
-    };
+export type { Point, SmartShape } from "../types/editor";
 
 export function detectSmartShape(points: Point[]): SmartShape | null {
   if (points.length < 10) return null;
