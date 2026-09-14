@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Production builds and tool caches
+dist/
+.vite/
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editors and IDEs
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Test coverage
+coverage/
