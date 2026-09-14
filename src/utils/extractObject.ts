@@ -54,30 +54,23 @@ export function extractObject(
   let minX = startX, maxX = startX;
   let minY = startY, maxY = startY;
 
-  // Один объект может состоять из нескольких близких компонентов, например букв в слове.
-  const searchComponentsQueue: [number, number][] = [[startX, startY]];
+  // Берём только компонент, на который нажал пользователь. Раньше соседние
+  // компоненты автоматически объединялись с зазором 15 px, поэтому близкие
+  // предметы цепочкой склеивались и перемещались как одна группа.
+  const stack = [startX, startY];
+  visited[getPixelOffset(startX, startY)] = 1;
 
-  while (searchComponentsQueue.length > 0) {
-    const [sx, sy] = searchComponentsQueue.pop()!;
-    if (visited[getPixelOffset(sx, sy)]) continue;
-
-    const stack = [sx, sy];
-    visited[getPixelOffset(sx, sy)] = 1;
-
-    let compMinX = sx, compMaxX = sx;
-    let compMinY = sy, compMaxY = sy;
-
-    while (stack.length > 0) {
+  while (stack.length > 0) {
       const y = stack.pop()!;
       const x = stack.pop()!;
       
       const pixelOffset = getPixelOffset(x, y);
       objectPixels.push(pixelOffset);
       
-      if (x < compMinX) compMinX = x;
-      if (x > compMaxX) compMaxX = x;
-      if (y < compMinY) compMinY = y;
-      if (y > compMaxY) compMaxY = y;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
 
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
@@ -96,27 +89,6 @@ export function extractObject(
           }
         }
       }
-    }
-
-    if (compMinX < minX) minX = compMinX;
-    if (compMaxX > maxX) maxX = compMaxX;
-    if (compMinY < minY) minY = compMinY;
-    if (compMaxY > maxY) maxY = compMaxY;
-
-    const nearbyComponentGap = 15;
-    const searchMinX = Math.max(0, compMinX - nearbyComponentGap);
-    const searchMaxX = Math.min(width - 1, compMaxX + nearbyComponentGap);
-    const searchMinY = Math.max(0, compMinY - nearbyComponentGap);
-    const searchMaxY = Math.min(height - 1, compMaxY + nearbyComponentGap);
-
-    for (let y = searchMinY; y <= searchMaxY; y++) {
-      for (let x = searchMinX; x <= searchMaxX; x++) {
-        const pixelOffset = getPixelOffset(x, y);
-        if (!visited[pixelOffset] && !isBackgroundPixel(pixelOffset * 4)) {
-          searchComponentsQueue.push([x, y]);
-        }
-      }
-    }
   }
 
   const objWidth = maxX - minX + 1;
@@ -158,5 +130,90 @@ export function extractObject(
     y: minY,
     width: objWidth,
     height: objHeight
+  };
+}
+
+export function extractObjectInRect(
+  ctx: CanvasRenderingContext2D,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+): { canvas: HTMLCanvasElement; x: number; y: number; width: number; height: number } | null {
+  const canvasWidth = ctx.canvas.width;
+  const canvasHeight = ctx.canvas.height;
+  const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+  const data = imageData.data;
+
+  const left = Math.max(0, Math.floor(Math.min(startX, endX)));
+  const top = Math.max(0, Math.floor(Math.min(startY, endY)));
+  const right = Math.min(canvasWidth - 1, Math.ceil(Math.max(startX, endX)));
+  const bottom = Math.min(canvasHeight - 1, Math.ceil(Math.max(startY, endY)));
+
+  if (right < left || bottom < top) return null;
+
+  const isBackgroundPixel = (index: number) => {
+    if (data[index + 3] === 0) return true;
+    return data[index] > 250 && data[index + 1] > 250 && data[index + 2] > 250;
+  };
+
+  const objectPixels: number[] = [];
+  let minX = right;
+  let minY = bottom;
+  let maxX = left;
+  let maxY = top;
+
+  for (let y = top; y <= bottom; y++) {
+    for (let x = left; x <= right; x++) {
+      const pixelOffset = y * canvasWidth + x;
+      if (isBackgroundPixel(pixelOffset * 4)) continue;
+
+      objectPixels.push(pixelOffset);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (objectPixels.length === 0) return null;
+
+  const objectWidth = maxX - minX + 1;
+  const objectHeight = maxY - minY + 1;
+  const objectCanvas = document.createElement("canvas");
+  objectCanvas.width = objectWidth;
+  objectCanvas.height = objectHeight;
+
+  const objectCtx = objectCanvas.getContext("2d");
+  if (!objectCtx) return null;
+
+  const objectImageData = objectCtx.createImageData(objectWidth, objectHeight);
+
+  for (const pixelOffset of objectPixels) {
+    const x = pixelOffset % canvasWidth;
+    const y = Math.floor(pixelOffset / canvasWidth);
+    const sourceIndex = pixelOffset * 4;
+    const targetIndex = ((y - minY) * objectWidth + (x - minX)) * 4;
+
+    objectImageData.data[targetIndex] = data[sourceIndex];
+    objectImageData.data[targetIndex + 1] = data[sourceIndex + 1];
+    objectImageData.data[targetIndex + 2] = data[sourceIndex + 2];
+    objectImageData.data[targetIndex + 3] = data[sourceIndex + 3];
+
+    data[sourceIndex] = 255;
+    data[sourceIndex + 1] = 255;
+    data[sourceIndex + 2] = 255;
+    data[sourceIndex + 3] = 255;
+  }
+
+  objectCtx.putImageData(objectImageData, 0, 0);
+  ctx.putImageData(imageData, 0, 0);
+
+  return {
+    canvas: objectCanvas,
+    x: minX,
+    y: minY,
+    width: objectWidth,
+    height: objectHeight,
   };
 }

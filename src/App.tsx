@@ -25,12 +25,18 @@ import {
   Pipette,
   Palette,
   Star,
+  Triangle,
+  Diamond,
+  ArrowRight,
+  Heart,
+  Hexagon,
+  Shapes,
   Type,
   MousePointer2,
 } from "lucide-react";
 import { cn } from "./utils/cn";
 import { floodFill } from "./utils/floodFill";
-import { extractObject } from "./utils/extractObject";
+import { extractObject, extractObjectInRect } from "./utils/extractObject";
 import { detectSmartShape, type Point, type SmartShape } from "./utils/shapeDetection";
 import { exportToGif } from "./utils/gifExport";
 import { playPop, playSwoosh, playAction, playError } from "./utils/audio";
@@ -73,11 +79,21 @@ type ToolId =
   | "eraser"
   | "fill"
   | "pipette"
-  | "line"
-  | "circle"
-  | "rect"
+  | "shape"
   | "text"
   | "sticker";
+
+type ShapeId =
+  | "line"
+  | "rect"
+  | "circle"
+  | "ellipse"
+  | "triangle"
+  | "diamond"
+  | "arrow"
+  | "star"
+  | "heart"
+  | "hexagon";
 
 interface ToolOption {
   id: ToolId;
@@ -144,12 +160,26 @@ const TOOLS: ToolOption[] = [
   { id: "brush", icon: Pen, label: "Кисть" },
   { id: "eraser", icon: Eraser, label: "Ластик" },
   { id: "fill", icon: PaintBucket, label: "Заливка" },
-  { id: "pipette", icon: Pipette, label: "Пипетка" },
-  { id: "line", icon: Minus, label: "Линия" },
-  { id: "circle", icon: Circle, label: "Круг" },
-  { id: "rect", icon: Square, label: "Квадрат" },
+  { id: "shape", icon: Shapes, label: "Фигуры" },
   { id: "text", icon: Type, label: "Текст" },
   { id: "sticker", icon: Smile, label: "Стикер" },
+];
+
+const SHAPES: Array<{
+  id: ShapeId;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+}> = [
+  { id: "line", icon: Minus, label: "Линия" },
+  { id: "rect", icon: Square, label: "Квадрат" },
+  { id: "circle", icon: Circle, label: "Круг" },
+  { id: "ellipse", icon: Circle, label: "Овал" },
+  { id: "triangle", icon: Triangle, label: "Треугольник" },
+  { id: "diamond", icon: Diamond, label: "Ромб" },
+  { id: "arrow", icon: ArrowRight, label: "Стрелка" },
+  { id: "star", icon: Star, label: "Звезда" },
+  { id: "heart", icon: Heart, label: "Сердце" },
+  { id: "hexagon", icon: Hexagon, label: "Шестиугольник" },
 ];
 
 const STICKERS = [
@@ -314,6 +344,86 @@ const drawPerfectShape = (
   if (symmetry) draw(true);
 };
 
+const traceShapePath = (
+  ctx: CanvasRenderingContext2D,
+  shape: ShapeId,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+) => {
+  const left = Math.min(startX, endX);
+  const top = Math.min(startY, endY);
+  const width = Math.abs(endX - startX);
+  const height = Math.abs(endY - startY);
+  const right = left + width;
+  const bottom = top + height;
+  const cx = left + width / 2;
+  const cy = top + height / 2;
+
+  if (shape === "line") {
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(endX, endY);
+    return;
+  }
+  if (shape === "arrow") {
+    const angle = Math.atan2(endY - startY, endX - startX);
+    const headLength = Math.max(14, Math.min(42, Math.hypot(width, height) * 0.25));
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(endX, endY);
+    ctx.moveTo(endX, endY);
+    ctx.lineTo(endX - headLength * Math.cos(angle - Math.PI / 6), endY - headLength * Math.sin(angle - Math.PI / 6));
+    ctx.moveTo(endX, endY);
+    ctx.lineTo(endX - headLength * Math.cos(angle + Math.PI / 6), endY - headLength * Math.sin(angle + Math.PI / 6));
+    return;
+  }
+  if (shape === "rect") {
+    ctx.rect(startX, startY, endX - startX, endY - startY);
+    return;
+  }
+  if (shape === "circle") {
+    ctx.arc(startX, startY, Math.hypot(endX - startX, endY - startY), 0, Math.PI * 2);
+    return;
+  }
+  if (shape === "ellipse") {
+    ctx.ellipse(cx, cy, Math.max(width / 2, 1), Math.max(height / 2, 1), 0, 0, Math.PI * 2);
+    return;
+  }
+  if (shape === "triangle") {
+    ctx.moveTo(cx, top);
+    ctx.lineTo(right, bottom);
+    ctx.lineTo(left, bottom);
+    ctx.closePath();
+    return;
+  }
+  if (shape === "diamond") {
+    ctx.moveTo(cx, top);
+    ctx.lineTo(right, cy);
+    ctx.lineTo(cx, bottom);
+    ctx.lineTo(left, cy);
+    ctx.closePath();
+    return;
+  }
+  if (shape === "heart") {
+    ctx.moveTo(cx, bottom);
+    ctx.bezierCurveTo(left - width * 0.08, cy + height * 0.2, left, top, cx, top + height * 0.28);
+    ctx.bezierCurveTo(right, top, right + width * 0.08, cy + height * 0.2, cx, bottom);
+    ctx.closePath();
+    return;
+  }
+
+  const points = shape === "star" ? 10 : 6;
+  for (let i = 0; i < points; i++) {
+    const angle = -Math.PI / 2 + (i * Math.PI * 2) / points;
+    const radiusScale = shape === "star" && i % 2 === 1 ? 0.45 : 1;
+    const px = cx + Math.cos(angle) * (width / 2) * radiusScale;
+    const py = cy + Math.sin(angle) * (height / 2) * radiusScale;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+};
+
 const getBlankCanvas = () => {
   const c = document.createElement("canvas");
   c.width = CANVAS_WIDTH;
@@ -392,6 +502,7 @@ export default function App() {
   );
 
   const [tool, setTool] = useState<ToolId>("brush");
+  const [selectedShape, setSelectedShape] = useState<ShapeId>("line");
   const [color, setColor] = useState(BASIC_COLORS[0].hex);
   const [brushSize, setBrushSize] = useState(BRUSH_SIZES[1].size);
 
@@ -410,6 +521,7 @@ export default function App() {
   const [customSat, setCustomSat] = useState(100);
   const [customVal, setCustomVal] = useState(100);
   const colorSquareRef = useRef<HTMLDivElement>(null);
+  const pipetteReturnToolRef = useRef<ToolId>("brush");
 
   const [activeSticker, setActiveSticker] = useState<{
     emoji: string;
@@ -468,6 +580,8 @@ export default function App() {
   const [placedTexts, setPlacedTexts] = useState<PlacedText[]>([]);
 
   const isMovingSelectionRef = useRef(false);
+  const isBoxSelectingRef = useRef(false);
+  const selectionStartRef = useRef({ x: 0, y: 0 });
   const initialSelectionPosRef = useRef({ x: 0, y: 0 });
 
   const [draggedFrameIdx, setDraggedFrameIdx] = useState<number | null>(null);
@@ -654,7 +768,7 @@ export default function App() {
   }, [clearOverlayCanvas]);
 
   const handleSetTool = useCallback(
-    (newTool: string) => {
+    (newTool: ToolId) => {
       if (tool === "sticker" && newTool !== "sticker" && activeSticker && newTool !== "select") {
         finalizeSticker();
       }
@@ -678,6 +792,12 @@ export default function App() {
       finalizeSelection,
     ],
   );
+
+  const activatePipette = useCallback(() => {
+    if (tool !== "pipette") pipetteReturnToolRef.current = tool;
+    handleSetTool("pipette");
+    playPop();
+  }, [handleSetTool, tool]);
 
   const convertSelectionToText = useCallback((matchedText?: PlacedText | null) => {
     if (!activeSelection) return;
@@ -792,6 +912,67 @@ export default function App() {
     };
   };
 
+  const isSelectionPixelAt = (
+    selection: ActiveSelection,
+    x: number,
+    y: number,
+  ) => {
+    if (
+      x < selection.x ||
+      x > selection.x + selection.width ||
+      y < selection.y ||
+      y > selection.y + selection.height
+    ) {
+      return false;
+    }
+
+    const selectionCtx = selection.canvas.getContext("2d", {
+      willReadFrequently: true,
+    });
+    if (!selectionCtx || selection.width <= 0 || selection.height <= 0) {
+      return false;
+    }
+
+    const localX = Math.floor(
+      ((x - selection.x) / selection.width) * selection.canvas.width,
+    );
+    const localY = Math.floor(
+      ((y - selection.y) / selection.height) * selection.canvas.height,
+    );
+    const radiusX = Math.max(
+      1,
+      Math.ceil((8 / selection.width) * selection.canvas.width),
+    );
+    const radiusY = Math.max(
+      1,
+      Math.ceil((8 / selection.height) * selection.canvas.height),
+    );
+    const sampleX = Math.max(0, localX - radiusX);
+    const sampleY = Math.max(0, localY - radiusY);
+    const sampleWidth = Math.min(
+      selection.canvas.width - sampleX,
+      radiusX * 2 + 1,
+    );
+    const sampleHeight = Math.min(
+      selection.canvas.height - sampleY,
+      radiusY * 2 + 1,
+    );
+
+    if (sampleWidth <= 0 || sampleHeight <= 0) return false;
+
+    const pixels = selectionCtx.getImageData(
+      sampleX,
+      sampleY,
+      sampleWidth,
+      sampleHeight,
+    ).data;
+
+    for (let index = 3; index < pixels.length; index += 4) {
+      if (pixels[index] > 0) return true;
+    }
+    return false;
+  };
+
   const handleColorSelect = useCallback((c: string) => {
     setColor(c);
     setRecentColors((prev) => {
@@ -815,6 +996,8 @@ export default function App() {
     const mainCtx = mainCanvas?.getContext("2d", { willReadFrequently: true });
     if (!mainCanvas || !mainCtx) return;
 
+    e.currentTarget.setPointerCapture(e.pointerId);
+
     if (tool === "select") {
       if (activeText) {
         mainCtx.font = `${activeText.size}px ${activeText.font}`;
@@ -835,12 +1018,7 @@ export default function App() {
       }
 
       if (activeSelection) {
-        if (
-          x >= activeSelection.x &&
-          x <= activeSelection.x + activeSelection.width &&
-          y >= activeSelection.y &&
-          y <= activeSelection.y + activeSelection.height
-        ) {
+        if (isSelectionPixelAt(activeSelection, x, y)) {
           isMovingSelectionRef.current = true;
           startPosRef.current = { x, y };
           initialSelectionPosRef.current = {
@@ -865,6 +1043,10 @@ export default function App() {
 
         saveCanvasSnapshot(mainCanvas);
         playPop();
+      } else {
+        isBoxSelectingRef.current = true;
+        selectionStartRef.current = { x, y };
+        startPosRef.current = { x, y };
       }
       return;
     }
@@ -877,7 +1059,7 @@ export default function App() {
         const hex = rgbToHex(pixel[0], pixel[1], pixel[2]);
         handleColorSelect(hex);
       }
-      setTool("brush");
+      handleSetTool(pipetteReturnToolRef.current);
       playPop();
       return;
     }
@@ -1026,14 +1208,44 @@ export default function App() {
     const { x, y } = getCoordinates(e);
 
     if (tool === "select") {
+      if (isBoxSelectingRef.current) {
+        const overlayCanvas = overlayCanvasRef.current;
+        const overlayCtx = overlayCanvas?.getContext("2d");
+        if (!overlayCanvas || !overlayCtx) return;
+
+        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        overlayCtx.strokeStyle = "#2563EB";
+        overlayCtx.fillStyle = "rgba(37, 99, 235, 0.08)";
+        overlayCtx.lineWidth = 2;
+        overlayCtx.setLineDash([7, 5]);
+        overlayCtx.fillRect(
+          selectionStartRef.current.x,
+          selectionStartRef.current.y,
+          x - selectionStartRef.current.x,
+          y - selectionStartRef.current.y,
+        );
+        overlayCtx.strokeRect(
+          selectionStartRef.current.x,
+          selectionStartRef.current.y,
+          x - selectionStartRef.current.x,
+          y - selectionStartRef.current.y,
+        );
+        overlayCtx.setLineDash([]);
+        return;
+      }
+
       if (activeSelection && isMovingSelectionRef.current) {
         const dx = x - startPosRef.current.x;
         const dy = y - startPosRef.current.y;
-        setActiveSelection({
-          ...activeSelection,
-          x: initialSelectionPosRef.current.x + dx,
-          y: initialSelectionPosRef.current.y + dy,
-        });
+        setActiveSelection((selection) =>
+          selection
+            ? {
+                ...selection,
+                x: initialSelectionPosRef.current.x + dx,
+                y: initialSelectionPosRef.current.y + dy,
+              }
+            : selection,
+        );
         return;
       }
     }
@@ -1119,16 +1331,8 @@ export default function App() {
     const startY = startPosRef.current.y;
 
     overlayCtx.beginPath();
-    if (tool === "line") {
-      overlayCtx.moveTo(startX, startY);
-      overlayCtx.lineTo(x, y);
-    } else if (tool === "rect") {
-      overlayCtx.rect(startX, startY, x - startX, y - startY);
-    } else if (tool === "circle") {
-      const radius = Math.sqrt(
-        Math.pow(x - startX, 2) + Math.pow(y - startY, 2),
-      );
-      overlayCtx.arc(startX, startY, radius, 0, 2 * Math.PI);
+    if (tool === "shape") {
+      traceShapePath(overlayCtx, selectedShape, startX, startY, x, y);
     }
     overlayCtx.stroke();
   };
@@ -1136,7 +1340,53 @@ export default function App() {
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (isPlaying) return;
 
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+
     if (tool === "select") {
+      if (isBoxSelectingRef.current) {
+        isBoxSelectingRef.current = false;
+        const { x, y } = getCoordinates(e);
+        const selectionStart = selectionStartRef.current;
+        const overlayCanvas = overlayCanvasRef.current;
+        const overlayCtx = overlayCanvas?.getContext("2d");
+        overlayCtx?.clearRect(
+          0,
+          0,
+          overlayCanvas?.width ?? 0,
+          overlayCanvas?.height ?? 0,
+        );
+
+        const selectionWidth = Math.abs(x - selectionStart.x);
+        const selectionHeight = Math.abs(y - selectionStart.y);
+        const mainCanvas = mainCanvasRef.current;
+        const mainCtx = mainCanvas?.getContext("2d", {
+          willReadFrequently: true,
+        });
+
+        if (
+          selectionWidth >= 6 &&
+          selectionHeight >= 6 &&
+          mainCanvas &&
+          mainCtx
+        ) {
+          const extractedObject = extractObjectInRect(
+            mainCtx,
+            selectionStart.x,
+            selectionStart.y,
+            x,
+            y,
+          );
+          if (extractedObject) {
+            setActiveSelection(extractedObject);
+            saveCanvasSnapshot(mainCanvas);
+            playPop();
+          }
+        }
+        return;
+      }
+
       if (isMovingSelectionRef.current) {
         isMovingSelectionRef.current = false;
         return;
@@ -1185,8 +1435,6 @@ export default function App() {
 
       saveCanvasSnapshot(mainCanvas);
 
-      setTimeout(() => runCensorCheck(), 100);
-
       if (assistMode && pointsRef.current.length > 20 && Math.random() > 0.5) {
         setFeedback({
           text: PRAISE_MESSAGES[Math.floor(Math.random() * PRAISE_MESSAGES.length)],
@@ -1202,7 +1450,7 @@ export default function App() {
       return;
     }
 
-    if (tool === "line" || tool === "rect" || tool === "circle") {
+    if (tool === "shape") {
       mainCtx.drawImage(overlayCanvas, 0, 0);
       overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
     }
@@ -1210,6 +1458,19 @@ export default function App() {
     saveCanvasSnapshot(mainCanvas);
 
 
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const wasBoxSelecting = isBoxSelectingRef.current;
+    isBoxSelectingRef.current = false;
+    isMovingSelectionRef.current = false;
+    isMovingTextRef.current = false;
+    isDrawingRef.current = false;
+    if (wasBoxSelecting || tool !== "select") clearOverlayCanvas();
+
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
   };
 
   useEffect(() => {
@@ -1538,7 +1799,7 @@ export default function App() {
               <button
                 key={t.id}
                 className={cn(
-                  "btn-kid w-14 h-14 sm:w-16 sm:h-16 flex flex-col items-center justify-center p-1 relative",
+                  "btn-kid w-14 h-14 sm:w-16 sm:h-16 flex flex-col items-center justify-center gap-0.5 p-1 relative",
                   tool === t.id &&
                     "btn-kid-active ring-4 ring-yellow-400 ring-offset-2",
                 )}
@@ -1549,8 +1810,12 @@ export default function App() {
                     setShowStickerPanel(true);
                 }}
                 title={t.label}
+                aria-label={t.label}
               >
-                <t.icon className="w-8 h-8" />
+                <t.icon className="w-7 h-7 shrink-0" />
+                <span className="w-full truncate text-[8px] sm:text-[9px] font-black leading-none">
+                  {t.label}
+                </span>
               </button>
             ))}
           </div>
@@ -1559,7 +1824,7 @@ export default function App() {
         <aside className="w-48 sm:w-60 bg-blue-50/50 flex flex-col pt-0 pb-6 overflow-y-auto no-scrollbar shrink-0 z-20 transition-all duration-300">
           <div className="bg-white py-4 px-4 border-b-4 border-black mb-4 sticky top-0 z-10 shadow-sm flex items-center justify-center">
             <span className="font-black text-lg sm:text-lg uppercase tracking-wider text-black">
-              {TOOLS.find((t) => t.id === tool)?.label}
+              {tool === "pipette" ? "Цвет" : TOOLS.find((t) => t.id === tool)?.label}
             </span>
           </div>
 
@@ -1568,7 +1833,7 @@ export default function App() {
               <div className="flex flex-col gap-6">
                 {!activeSelection && !activeText ? (
                   <div className="text-center text-sm font-bold text-gray-500 mt-4 px-2">
-                    ✨ Обведи или кликни на предмет на холсте, чтобы изменить его!
+                    Нажми на штрих или обведи весь предмет рамкой, затем перетащи.
                   </div>
                 ) : activeSelection && !activeText ? (
                   <>
@@ -1699,7 +1964,38 @@ export default function App() {
               </div>
             )}
 
-            {["brush", "eraser", "line", "circle", "rect"].includes(tool) && (
+            {tool === "shape" && (
+              <div className="flex flex-col gap-3">
+                <div className="text-[10px] font-bold text-gray-400 text-center uppercase tracking-wider">
+                  Выбери фигуру
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {SHAPES.map((shape) => (
+                    <button
+                      key={shape.id}
+                      className={cn(
+                        "btn-kid min-h-16 p-2 flex flex-col items-center justify-center gap-1",
+                        selectedShape === shape.id &&
+                          "btn-kid-active ring-2 ring-blue-500",
+                      )}
+                      onClick={() => {
+                        playPop();
+                        setSelectedShape(shape.id);
+                      }}
+                      title={shape.label}
+                      aria-label={shape.label}
+                    >
+                      <shape.icon className="w-7 h-7" />
+                      <span className="text-[9px] font-black leading-none">
+                        {shape.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {["brush", "eraser", "shape"].includes(tool) && (
               <div className="flex flex-col gap-3">
                 <div className="text-[10px] font-bold text-gray-400 text-center uppercase tracking-wider">
                   Толщина
@@ -1842,7 +2138,7 @@ export default function App() {
               <hr className="border-2 border-gray-200 rounded-full opacity-50" />
             )}
 
-            {(["brush", "fill", "line", "circle", "rect", "text"].includes(tool) || (tool === "select" && activeText)) && (
+            {(["brush", "fill", "shape", "text"].includes(tool) || (tool === "select" && activeText)) && (
               <div className="flex flex-col gap-3 items-center">
                 <div className="text-[10px] font-bold text-gray-400 text-center uppercase tracking-wider">
                   Цвет
@@ -1928,16 +2224,6 @@ export default function App() {
               </div>
             )}
 
-            {tool === "pipette" && (
-              <div className="flex flex-col items-center text-center gap-4 text-gray-600 pt-4">
-                <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center text-blue-500 shadow-inner">
-                  <Pipette className="w-10 h-10" />
-                </div>
-                <p className="font-bold text-sm">
-                  Наведи на любой участок рисунка и нажми, чтобы взять его цвет!
-                </p>
-              </div>
-            )}
           </div>
         </aside>
 
@@ -1956,11 +2242,14 @@ export default function App() {
               ref={overlayCanvasRef}
               width={CANVAS_WIDTH}
               height={CANVAS_HEIGHT}
-              className="absolute inset-0 w-full h-full"
+              className={cn(
+                "absolute inset-0 w-full h-full touch-none",
+                tool === "select" && "cursor-crosshair",
+              )}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
-              onPointerOut={handlePointerUp}
+              onPointerCancel={handlePointerCancel}
               onContextMenu={handleContextMenu}
             />
             {activeTemplate && (
@@ -2268,6 +2557,17 @@ export default function App() {
                   <div className="flex-1">
                     <div className="text-lg font-bold">Текущий цвет</div>
                   </div>
+                  <button
+                    className="btn-kid p-3 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors"
+                    onClick={() => {
+                      setShowColorModal(false);
+                      activatePipette();
+                    }}
+                    title="Взять цвет с рисунка"
+                    aria-label="Пипетка"
+                  >
+                    <Pipette className="w-8 h-8" />
+                  </button>
                   <button
                     className={cn(
                       "btn-kid p-3 transition-colors",

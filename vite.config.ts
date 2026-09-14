@@ -13,6 +13,11 @@ export default defineConfig(() => {
     },
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
+      watch: {
+        // Visual Studio держит файлы индекса открытыми, из-за чего chokidar
+        // на Windows завершает dev-сервер с EBUSY.
+        ignored: ['**/.vs/**'],
+      },
     },
   };
 });
