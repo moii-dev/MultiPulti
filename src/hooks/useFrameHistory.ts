@@ -26,6 +26,19 @@ export function useFrameHistory(initialState: StoredAppState | null) {
     saveFrames(nextFrames);
   }, [currentFrame, frames, saveFrames]);
 
+  const discardBlockedFrame = useCallback(() => {
+    setHistory((previousHistory) => {
+      const latestFrames = previousHistory[previousHistory.length - 1]?.frames ?? [createBlankFrame()];
+      const cleanFrames = latestFrames.length <= 1
+        ? [createBlankFrame()]
+        : latestFrames.filter((_, index) => index !== currentFrame);
+      const nextFrame = Math.min(currentFrame, cleanFrames.length - 1);
+      setCurrentFrame(nextFrame);
+      setHistoryIndex(0);
+      return [{ frames: cleanFrames }];
+    });
+  }, [currentFrame]);
+
   return {
     history,
     historyIndex,
@@ -35,5 +48,6 @@ export function useFrameHistory(initialState: StoredAppState | null) {
     frames,
     saveFrames,
     saveCanvasSnapshot,
+    discardBlockedFrame,
   };
 }

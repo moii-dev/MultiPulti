@@ -134,6 +134,12 @@ npm run lint
 Запускает проверку TypeScript без генерации файлов: `tsc --noEmit`.
 
 ```bash
+npm test
+```
+
+Проверяет базовые безопасный и блокируемый сценарии пиксельного content-фильтра и контракт PNG-экспорта.
+
+```bash
 npm run build
 ```
 
@@ -168,7 +174,9 @@ src
 │   └── editor.ts
 ├── hooks
 │   ├── useAnimationPlayback.ts
+│   ├── useContentModeration.ts
 │   ├── useFrameHistory.ts
+│   ├── useKeyboardShortcuts.ts
 │   └── useProjectPersistence.ts
 ├── services
 │   ├── imageExport.ts
@@ -178,6 +186,7 @@ src
 ├── utils
 │   ├── audio.ts
 │   ├── cn.ts
+│   ├── contentFilter.ts
 │   ├── extractObject.ts
 │   ├── floodFill.ts
 │   ├── gifExport.ts
@@ -202,7 +211,7 @@ Canvas разделен на два слоя:
 
 ### `src/hooks`
 
-`useFrameHistory` управляет кадрами, снимками и ветвлением undo/redo. `useAnimationPlayback` изолирует таймер воспроизведения и скорость анимации, а `useProjectPersistence` синхронизирует проект с browser storage.
+`useFrameHistory` управляет кадрами, снимками и ветвлением undo/redo. `useAnimationPlayback` изолирует таймер воспроизведения, `useProjectPersistence` синхронизирует проект с browser storage, `useContentModeration` координирует проверку кадра, а `useKeyboardShortcuts` подписывает приложение на сочетания клавиш без устаревших замыканий.
 
 ### `src/canvas/operations.ts`
 
@@ -218,7 +227,7 @@ Canvas разделен на два слоя:
 
 ### `src/utils`
 
-Специализированные алгоритмы заливки, извлечения объекта, распознавания простых фигур, GIF-кодирования, звуков интерфейса и объединения CSS-классов.
+Специализированные алгоритмы заливки, извлечения объекта, распознавания простых фигур, пиксельной проверки содержимого, GIF-кодирования, звуков интерфейса и объединения CSS-классов.
 
 ### `src/index.css`
 
@@ -261,6 +270,14 @@ Canvas разделен на два слоя:
 Если полная история становится слишком большой для `localStorage`, приложение пытается сохранить минимальное состояние с текущим кадром.
 
 ## Основные пользовательские сценарии
+
+### Горячие клавиши
+
+- `Ctrl+Z` / `Cmd+Z` — отменить действие.
+- `Ctrl+Shift+Z` / `Cmd+Shift+Z` — повторить действие.
+- `Ctrl+Y` / `Cmd+Y` — повторить действие в Windows-стиле.
+
+Сочетания не перехватываются, когда фокус находится в поле ввода текста.
 
 ### Нарисовать кадр
 

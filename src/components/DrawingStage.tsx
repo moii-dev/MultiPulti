@@ -12,6 +12,7 @@ interface DrawingStageProps {
   activeText: ActiveText | null;
   textInput: string;
   feedback: { text: string; id: number } | null;
+  contentWarning: { text: string; id: number } | null;
   isPlaying: boolean;
   onPointerDown: (event: PointerEvent<HTMLCanvasElement>) => void;
   onPointerMove: (event: PointerEvent<HTMLCanvasElement>) => void;
@@ -67,9 +68,16 @@ export function DrawingStage(props: DrawingStageProps) {
             {props.feedback.text}
           </div>
         )}
+        {props.contentWarning && (
+          <div key={props.contentWarning.id} className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none">
+            <div className="bg-red-500/90 backdrop-blur-sm text-white px-8 py-6 rounded-3xl border-4 border-white shadow-2xl max-w-md text-center animate-bounce">
+              <div className="text-3xl sm:text-4xl font-black mb-2">🚫</div>
+              <div className="text-lg sm:text-xl font-bold leading-snug">{props.contentWarning.text}</div>
+            </div>
+          </div>
+        )}
         {props.isPlaying && <div className="absolute top-4 right-4 bg-red-500 text-white px-4 py-2 rounded-full font-bold animate-pulse border-4 border-black">🔴 ЗАПИСЬ</div>}
       </div>
     </main>
   );
 }
-

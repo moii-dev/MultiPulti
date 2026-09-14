@@ -1,5 +1,3 @@
-import { exportToGif } from "../utils/gifExport";
-
 function download(url: string, filename: string) {
   const link = document.createElement("a");
   link.download = filename;
@@ -12,6 +10,7 @@ export function downloadPng(dataUrl: string) {
 }
 
 export async function downloadGif(frames: string[], fps: number, width: number, height: number) {
+  const { exportToGif } = await import("../utils/gifExport");
   const blob = await exportToGif(frames, fps, width, height);
   const url = URL.createObjectURL(blob);
   try {
@@ -20,4 +19,3 @@ export async function downloadGif(frames: string[], fps: number, width: number, 
     URL.revokeObjectURL(url);
   }
 }
-

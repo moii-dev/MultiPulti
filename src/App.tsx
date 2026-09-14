@@ -23,6 +23,8 @@ import { loadProjectState } from "./services/projectStorage";
 import { useAnimationPlayback } from "./hooks/useAnimationPlayback";
 import { useFrameHistory } from "./hooks/useFrameHistory";
 import { useProjectPersistence } from "./hooks/useProjectPersistence";
+import { useContentModeration } from "./hooks/useContentModeration";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import type {
   ActiveSelection, ActiveSticker, ActiveText, CanvasClientPosition,
   EditorContextMenu, PlacedText, Point, ShapeId, ToolId,
@@ -41,6 +43,7 @@ export default function App() {
     frames,
     saveFrames: saveState,
     saveCanvasSnapshot,
+    discardBlockedFrame,
   } = useFrameHistory(initialState);
 
   const [tool, setTool] = useState<ToolId>("brush");
@@ -166,6 +169,25 @@ export default function App() {
     favoriteColors,
     recentColors,
   );
+
+  const { warning: contentWarning, checkCanvas: checkCanvasContent } =
+    useContentModeration({
+      onBlocked: discardBlockedFrame,
+      onErrorSound: playError,
+    });
+
+  useKeyboardShortcuts({
+    canUndo: historyIndex > 0 && !isPlaying,
+    canRedo: historyIndex < history.length - 1 && !isPlaying,
+    onUndo: () => {
+      playPop();
+      setHistoryIndex(Math.max(0, historyIndex - 1));
+    },
+    onRedo: () => {
+      playPop();
+      setHistoryIndex(Math.min(history.length - 1, historyIndex + 1));
+    },
+  });
 
 
 
@@ -557,6 +579,7 @@ export default function App() {
       playAction();
       floodFill(mainCtx, Math.floor(x), Math.floor(y), color);
       saveCanvasSnapshot(mainCanvas);
+      checkCanvasContent(mainCanvas);
 
       return;
     }
@@ -839,6 +862,7 @@ export default function App() {
       overlayCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
       saveCanvasSnapshot(mainCanvas);
+      checkCanvasContent(mainCanvas);
 
       if (assistMode && pointsRef.current.length > 20 && Math.random() > 0.5) {
         setFeedback({
@@ -861,6 +885,7 @@ export default function App() {
     }
 
     saveCanvasSnapshot(mainCanvas);
+    checkCanvasContent(mainCanvas);
 
 
   };
@@ -1186,6 +1211,7 @@ export default function App() {
           activeText={activeText}
           textInput={textInput}
           feedback={feedback}
+          contentWarning={contentWarning}
           isPlaying={isPlaying}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
