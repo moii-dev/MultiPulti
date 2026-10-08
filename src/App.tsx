@@ -27,14 +27,13 @@ import { useProjectLoader } from "./hooks/useProjectLoader";
 import { useAnimationPlayback } from "./hooks/useAnimationPlayback";
 import { useFrameHistory } from "./hooks/useFrameHistory";
 import { useProjectPersistence } from "./hooks/useProjectPersistence";
-import { useContentModeration } from "./hooks/useContentModeration";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useSelection } from "./hooks/useSelection";
 import { useTextTool } from "./hooks/useTextTool";
 import { useStickerTool } from "./hooks/useStickerTool";
 import { useFrames } from "./hooks/useFrames";
 import { useCanvasDrawing } from "./hooks/useCanvasDrawing";
-import { playAction, playPop, playError, playSwoosh } from "./utils/audio";
+import { playAction, playPop, playSwoosh } from "./utils/audio";
 import type {
   EditorContextMenu,
   Frame,
@@ -82,7 +81,6 @@ function Editor({
     frames,
     saveFrames: saveState,
     saveCanvasSnapshot,
-    discardBlockedFrame,
     getFrames,
   } = useFrameHistory(initialState);
 
@@ -321,12 +319,6 @@ function Editor({
     playPop();
   };
 
-  // Moderation
-  const { warning: contentWarning, checkCanvas: checkCanvasContent } = useContentModeration({
-    onBlocked: discardBlockedFrame,
-    onErrorSound: playError,
-  });
-
   // Frame lifecycle & raster rendering hook
   const isDrawingRef = useRef(false);
   const frameManager = useFrames({
@@ -346,8 +338,6 @@ function Editor({
     isPlaying,
     commitPendingChanges,
     cancelPendingChanges,
-    onModerationBlocked: playError,
-    onFrameRendered: checkCanvasContent,
   });
 
   // Canvas drawing & pointer interaction hook
@@ -383,7 +373,6 @@ function Editor({
     commitPendingChanges,
     saveCanvasSnapshot,
     saveRasterOverlay: frameManager.saveRasterOverlay,
-    checkCanvasContent,
     handleColorSelect,
     setFeedback,
     setContextMenu,
@@ -614,7 +603,6 @@ function Editor({
           activeText={textTool.activeText}
           textInput={textTool.textInput}
           feedback={feedback}
-          contentWarning={contentWarning}
           isPlaying={isPlaying}
           onPointerDown={canvasDrawing.handlePointerDown}
           onPointerMove={canvasDrawing.handlePointerMove}

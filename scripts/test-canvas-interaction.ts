@@ -5,6 +5,7 @@ import {
   calculateTextInputGeometry,
   calculateAspectFitDimensions,
 } from "../src/canvas/operations";
+import { downloadPng } from "../src/services/imageExport";
 import { detectSmartShape } from "../src/utils/shapeDetection";
 import {
   createInitialPointerState,
@@ -357,6 +358,46 @@ test("PENDING CANCELLATION: Canvas clear and playback toggle safely discard acti
   assert.equal(activeTextState, null);
   // Original frame remained clean without uncommitted text object
   assert.equal(frames[0].objects.length, 0);
+});
+
+test("EXPORT: PNG export configures clean anchor download with correct filename pattern", () => {
+  const link = {
+    clickCount: 0,
+    download: "",
+    href: "",
+    click() {
+      this.clickCount += 1;
+    },
+  };
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: {
+      createElement(tagName: string) {
+        assert.equal(tagName, "a", `Экспорт создал неожиданный элемент ${tagName}`);
+        return link;
+      },
+    },
+  });
+
+  downloadPng("data:image/png;base64,test-valid-payload");
+  assert.equal(link.clickCount, 1, "PNG-экспорт не инициировал скачивание");
+  assert.equal(link.href, "data:image/png;base64,test-valid-payload", "PNG-экспорт изменил данные кадра");
+  assert.ok(
+    link.download.startsWith("рисунок-") && link.download.endsWith(".png"),
+    `Некорректное имя файла: ${link.download}`,
+  );
+});
+
+test("REGRESSION: drawing and frame saving operate without content moderation or frame blocking", () => {
+  // Verifies that arbitrary bitmap content (formerly subject to heuristics) commits directly to history
+  const arbitraryBitmap = "data:image/png;base64,arbitrary-unrestricted-content";
+  const initialFrame = createFrame(arbitraryBitmap);
+  const history = createHistory([initialFrame]);
+
+  // Saving a frame does not reject, strip, or discard the frame
+  assert.equal(history.entries.length, 1);
+  assert.equal(history.entries[0].frames[0].bitmap, arbitraryBitmap);
+  assert.equal(history.entries[0].frames[0].id, initialFrame.id);
 });
 
 

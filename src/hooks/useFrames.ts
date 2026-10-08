@@ -5,7 +5,6 @@ import {
   calculateAspectFitDimensions,
   createBlankFrame as getBlankCanvas,
 } from "../canvas/operations";
-import { analyzeFrame } from "../utils/contentFilter";
 import {
   cacheRaster,
   composeFrame,
@@ -41,8 +40,6 @@ interface UseFramesProps {
   isPlaying?: boolean;
   commitPendingChanges: () => Frame[];
   cancelPendingChanges: () => void;
-  onModerationBlocked?: () => void;
-  onFrameRendered?: (canvas: HTMLCanvasElement) => void;
 }
 
 export function useFrames({
@@ -62,8 +59,6 @@ export function useFrames({
   isPlaying = false,
   commitPendingChanges,
   cancelPendingChanges,
-  onModerationBlocked,
-  onFrameRendered,
 }: UseFramesProps) {
   const [draggedFrameIdx, setDraggedFrameIdx] = useState<number | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -116,9 +111,6 @@ export function useFrames({
         );
         loadedFrameIdRef.current = frame.id;
         setCanvasError(null);
-        if (!isPlayingRef.current) {
-          onFrameRendered?.(canvas);
-        }
       } catch {
         if (!cancelled) setCanvasError("Не удалось отобразить данные кадра");
       }
@@ -354,14 +346,6 @@ export function useFrames({
 
         ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
 
-        const moderation = analyzeFrame(canvas);
-        if (moderation.blocked) {
-          setCanvasError("Изображение заблокировано фильтром содержимого");
-          playError();
-          onModerationBlocked?.();
-          return;
-        }
-
         const currentFrames = getFrames();
         const targetExists = currentFrames.some((frame) => frame.id === target.id);
         if (!targetExists) return;
@@ -388,7 +372,7 @@ export function useFrames({
 
       img.src = objectUrl;
     },
-    [cancelPendingChanges, currentFrame, frames, getFrames, onModerationBlocked, saveState],
+    [cancelPendingChanges, currentFrame, frames, getFrames, saveState],
   );
 
   const handleDragStart = useCallback(

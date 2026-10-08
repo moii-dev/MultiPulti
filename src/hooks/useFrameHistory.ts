@@ -88,21 +88,6 @@ export function useFrameHistory(initialState: StoredAppState | null) {
     }
   }, [setHistoryIndex]);
 
-  const discardBlockedFrame = useCallback(() => update(previous => {
-    const currentFrames = previous.history[previous.historyIndex].frames;
-    const clean = currentFrames.length <= 1
-      ? [createFrame(createBlankFrame())]
-      : currentFrames.filter(frame => frame.id !== previous.currentFrameId);
-    const nextHistory = previous.history.map((entry, idx) =>
-      idx === previous.historyIndex ? { ...entry, frames: clean } : entry
-    );
-    return {
-      history: nextHistory,
-      historyIndex: previous.historyIndex,
-      currentFrameId: clean[0].id,
-    };
-  }), [update]);
-
   const getFrames = useCallback(() => latest.current.history[latest.current.historyIndex].frames, []);
 
   return {
@@ -117,7 +102,6 @@ export function useFrameHistory(initialState: StoredAppState | null) {
     setHistoryIndex,
     saveFrames,
     saveCanvasSnapshot,
-    discardBlockedFrame,
     getFrames,
   };
 }

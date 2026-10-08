@@ -69,7 +69,6 @@ interface UseCanvasDrawingProps {
   commitPendingChanges: () => Frame[];
   saveCanvasSnapshot: (canvas: HTMLCanvasElement) => void;
   saveRasterOverlay: (overlay: HTMLCanvasElement) => void;
-  checkCanvasContent: (canvas: HTMLCanvasElement) => void;
   handleColorSelect: (color: string) => void;
   setFeedback: React.Dispatch<React.SetStateAction<{ text: string; id: number } | null>>;
   setContextMenu: React.Dispatch<React.SetStateAction<EditorContextMenu | null>>;
@@ -108,7 +107,6 @@ export function useCanvasDrawing(props: UseCanvasDrawingProps) {
     commitPendingChanges,
     saveCanvasSnapshot,
     saveRasterOverlay,
-    checkCanvasContent,
     handleColorSelect,
     setFeedback,
     setContextMenu,
@@ -510,7 +508,6 @@ export function useCanvasDrawing(props: UseCanvasDrawingProps) {
       playAction();
       floodFill(mainCtx, Math.floor(x), Math.floor(y), color);
       saveCanvasSnapshot(mainCanvas);
-      checkCanvasContent(mainCanvas);
       return;
     }
 
@@ -828,7 +825,6 @@ export function useCanvasDrawing(props: UseCanvasDrawingProps) {
       saveRasterOverlay(overlayCanvas);
       mainCtx.drawImage(overlayCanvas, 0, 0);
       overlayCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      checkCanvasContent(mainCanvas);
 
       if (assistMode && pointsRef.current.length > 20 && Math.random() > 0.5) {
         setFeedback({
@@ -849,12 +845,10 @@ export function useCanvasDrawing(props: UseCanvasDrawingProps) {
       saveRasterOverlay(overlayCanvas);
       mainCtx.drawImage(overlayCanvas, 0, 0);
       overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-      checkCanvasContent(mainCanvas);
       return;
     }
 
     saveCanvasSnapshot(mainCanvas);
-    checkCanvasContent(mainCanvas);
   };
 
   const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {

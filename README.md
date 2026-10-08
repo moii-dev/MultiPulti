@@ -89,7 +89,6 @@ src/
 ├── hooks/                    # React-хуки жизненного цикла редактора
 │   ├── useAnimationPlayback.ts
 │   ├── useCanvasDrawing.ts
-│   ├── useContentModeration.ts
 │   ├── useFrameHistory.ts
 │   ├── useFrames.ts
 │   ├── useKeyboardShortcuts.ts
@@ -104,7 +103,6 @@ src/
 │   └── editor.ts             # Строгие TypeScript-типы проекта
 └── utils/                    # Чистые вспомогательные утилиты
     ├── audio.ts              # Звуковые эффекты действий
-    ├── contentFilter.ts      # Пиксельный эвристический фильтр
     ├── floodFill.ts          # Алгоритм заливки
     ├── gifExport.ts          # Генератор GIF с квантованием и прогрессом
     └── shapeDetection.ts     # Распознавание геометрических контуров
