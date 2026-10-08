@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "tsx scripts/test-content-filter.ts && tsx --test scripts/test-project.ts scripts/test-history.ts"
+    "test": "tsx scripts/test-content-filter.ts && tsx --test scripts/test-project.ts scripts/test-history.ts scripts/test-canvas-interaction.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

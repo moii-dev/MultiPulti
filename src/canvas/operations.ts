@@ -14,12 +14,52 @@ export function hsvToHex(h: number, s: number, v: number) {
   return `#${hex(channel(5))}${hex(channel(3))}${hex(channel(1))}`.toUpperCase();
 }
 
-export function getCanvasCoordinates(canvas: HTMLCanvasElement | null, position: CanvasClientPosition) {
+export function calculateCanvasCoordinates(
+  rect: { left: number; top: number; width: number; height: number },
+  canvasSize: { width: number; height: number },
+  position: CanvasClientPosition
+): Point {
+  if (rect.width <= 0 || rect.height <= 0) return { x: 0, y: 0 };
+  return {
+    x: (position.clientX - rect.left) * (canvasSize.width / rect.width),
+    y: (position.clientY - rect.top) * (canvasSize.height / rect.height),
+  };
+}
+
+export function getCanvasCoordinates(canvas: HTMLCanvasElement | null, position: CanvasClientPosition): Point {
   if (!canvas) return { x: 0, y: 0 };
   const rect = canvas.getBoundingClientRect();
+  return calculateCanvasCoordinates(rect, { width: canvas.width, height: canvas.height }, position);
+}
+
+export function calculateTextInputGeometry(
+  activeText: { x: number; y: number; size: number },
+  textLength: number,
+  canvasRect: { width: number; height: number } | null,
+  virtualCanvasSize: { width: number; height: number } = { width: CANVAS_WIDTH, height: CANVAS_HEIGHT }
+): {
+  leftPercent: number;
+  topPercent: number;
+  fontSizePx: number;
+  widthPx: number;
+  minWidthPx: number;
+} {
+  const scale = canvasRect && canvasRect.height > 0
+    ? canvasRect.height / virtualCanvasSize.height
+    : 1;
+
+  const leftPercent = (activeText.x / virtualCanvasSize.width) * 100;
+  const topPercent = (activeText.y / virtualCanvasSize.height) * 100;
+  const fontSizePx = Math.max(12, Math.round(activeText.size * scale));
+  const minWidthPx = Math.max(50, Math.round(50 * scale));
+  const widthPx = Math.max(minWidthPx, Math.round(Math.max(1, textLength) * activeText.size * 0.6 * scale));
+
   return {
-    x: (position.clientX - rect.left) * (canvas.width / rect.width),
-    y: (position.clientY - rect.top) * (canvas.height / rect.height),
+    leftPercent,
+    topPercent,
+    fontSizePx,
+    widthPx,
+    minWidthPx,
   };
 }
 
