@@ -24,17 +24,18 @@ export function useProjectPersistence(
   const selection = useRef(currentFrame);
   if (!isPlaying) selection.current = currentFrame;
   const frames = history[historyIndex].frames;
-  const currentFrameId = frames[currentFrame].id;
+  const currentFrameId = frames[currentFrame]?.id ?? frames[0]?.id;
   // Palette and playback ticks never serialize or write the heavy document.
   useEffect(() => {
-    if (!enabled || isPlaying) return;
+    if (!enabled || isPlaying || !currentFrameId) return;
     try { savePreferences({ favoriteColors, recentColors, fps, currentFrameId }); setPreferenceError(null); }
     catch { setPreferenceError('Не удалось сохранить настройки браузера'); }
   }, [enabled, isPlaying, currentFrameId, favoriteColors, recentColors, fps]);
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || frames.length === 0) return;
     const timer = window.setTimeout(() => {
-      const selected = frames[Math.min(selection.current, frames.length - 1)];
+      const selected = frames[Math.min(selection.current, frames.length - 1)] ?? frames[0];
+      if (!selected) return;
       enqueueSave({ version: 2, frames, currentFrameId: selected.id })
         .then(() => { if (mounted.current) setError(null); })
         .catch(() => { if (mounted.current) setError('Не удалось сохранить проект. Проверьте доступность и свободное место хранилища.'); });

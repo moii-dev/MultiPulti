@@ -9,13 +9,21 @@ export function downloadPng(dataUrl: string) {
   download(dataUrl, `рисунок-${Date.now()}.png`);
 }
 
-export async function downloadGif(frames: string[], fps: number, width: number, height: number) {
+export async function downloadGif(
+  frames: string[],
+  fps: number,
+  width: number,
+  height: number,
+  onProgress?: (current: number, total: number) => void,
+) {
   const { exportToGif } = await import("../utils/gifExport");
-  const blob = await exportToGif(frames, fps, width, height);
+  const blob = await exportToGif(frames, fps, width, height, onProgress);
   const url = URL.createObjectURL(blob);
   try {
     download(url, `мультик-${Date.now()}.gif`);
   } finally {
-    URL.revokeObjectURL(url);
+    // Небольшая задержка перед отзывом URL, чтобы браузер гарантированно успел начать загрузку Blob
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
   }
 }
+

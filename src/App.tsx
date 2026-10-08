@@ -117,6 +117,7 @@ function Editor({
   const [symmetryMode, setSymmetryMode] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; id: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<EditorContextMenu | null>(null);
+  const [isMobileSettingsOpen, setIsMobileSettingsOpen] = useState(false);
 
   // Playback
   const { isPlaying, setIsPlaying, fps, setFps } = useAnimationPlayback(
@@ -308,26 +309,6 @@ function Editor({
     textTool,
   ]);
 
-  // Frame lifecycle & raster rendering hook
-  const isDrawingRef = useRef(false);
-  const frameManager = useFrames({
-    frames,
-    currentFrame,
-    setCurrentFrame,
-    history,
-    saveState,
-    getFrames,
-    mainCanvasRef,
-    baseCanvasRef,
-    loadedFrameIdRef,
-    isDrawingRef,
-    activeTextId: textTool.activeText?.id,
-    activeStickerId: stickerTool.activeSticker?.id,
-    fps,
-    commitPendingChanges,
-    cancelPendingChanges,
-  });
-
   const handleColorSelect = useCallback((c: string) => {
     setColor(c);
     setRecentColors((prev) => [c, ...prev.filter((col) => col !== c)].slice(0, 8));
@@ -344,6 +325,29 @@ function Editor({
   const { warning: contentWarning, checkCanvas: checkCanvasContent } = useContentModeration({
     onBlocked: discardBlockedFrame,
     onErrorSound: playError,
+  });
+
+  // Frame lifecycle & raster rendering hook
+  const isDrawingRef = useRef(false);
+  const frameManager = useFrames({
+    frames,
+    currentFrame,
+    setCurrentFrame,
+    history,
+    saveState,
+    getFrames,
+    mainCanvasRef,
+    baseCanvasRef,
+    loadedFrameIdRef,
+    isDrawingRef,
+    activeTextId: textTool.activeText?.id,
+    activeStickerId: stickerTool.activeSticker?.id,
+    fps,
+    isPlaying,
+    commitPendingChanges,
+    cancelPendingChanges,
+    onModerationBlocked: playError,
+    onFrameRendered: checkCanvasContent,
   });
 
   // Canvas drawing & pointer interaction hook
@@ -420,11 +424,44 @@ function Editor({
     }
   }, [cancelPendingChanges, history.length, historyIndex, isPlaying, setHistoryIndex]);
 
+  const handleEscape = useCallback(() => {
+    if (showColorModal) {
+      setShowColorModal(false);
+      return;
+    }
+    if (showStickerPanel) {
+      setShowStickerPanel(false);
+      return;
+    }
+    if (showTemplatesPanel) {
+      setShowTemplatesPanel(false);
+      return;
+    }
+    if (contextMenu) {
+      setContextMenu(null);
+      return;
+    }
+    if (isMobileSettingsOpen) {
+      setIsMobileSettingsOpen(false);
+      return;
+    }
+    cancelPendingChanges();
+  }, [
+    cancelPendingChanges,
+    contextMenu,
+    isMobileSettingsOpen,
+    showColorModal,
+    showStickerPanel,
+    showTemplatesPanel,
+  ]);
+
   useKeyboardShortcuts({
     canUndo: historyIndex > 0 && !isPlaying,
     canRedo: historyIndex < history.length - 1 && !isPlaying,
+    isPlaying,
     onUndo: handleUndo,
     onRedo: handleRedo,
+    onEscape: handleEscape,
   });
 
   const handleSetTool = useCallback(
@@ -457,6 +494,7 @@ function Editor({
         historyLength={history.length}
         isPlaying={isPlaying}
         isExporting={frameManager.isExporting}
+        exportProgress={frameManager.exportProgress}
         fileInputRef={frameManager.fileInputRef}
         onUndo={handleUndo}
         onRedo={handleRedo}
@@ -470,6 +508,8 @@ function Editor({
         <ToolsPanel
           tool={tool}
           hasActiveSticker={Boolean(stickerTool.activeSticker)}
+          isMobileSettingsOpen={isMobileSettingsOpen}
+          onToggleMobileSettings={() => setIsMobileSettingsOpen((prev) => !prev)}
           onSelectTool={(nextTool) => {
             playPop();
             handleSetTool(nextTool);
@@ -479,6 +519,8 @@ function Editor({
 
         <ToolSettingsPanel
           tool={tool}
+          isOpenOnMobile={isMobileSettingsOpen}
+          onCloseMobile={() => setIsMobileSettingsOpen(false)}
           activeSelection={selectionTool.activeSelection}
           activeText={textTool.activeText}
           activeSticker={stickerTool.activeSticker}

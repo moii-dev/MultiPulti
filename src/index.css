@@ -13,6 +13,9 @@
   .btn-kid-active {
     @apply translate-y-[4px] shadow-none bg-yellow-300;
   }
+  .btn-kid:disabled {
+    @apply opacity-40 cursor-not-allowed hover:translate-y-0 hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-y-0 active:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] pointer-events-none;
+  }
   .color-slider {
     -webkit-appearance: none;
     appearance: none;
@@ -46,9 +49,14 @@
   }
 }
 
+:focus-visible {
+  outline: 3px solid #3b82f6;
+  outline-offset: 2px;
+}
+
 body {
   background-color: #f0f9ff;
   overflow: hidden;
-  /* Мобильный браузер не должен перехватывать жесты, пока ребенок рисует на холсте. */
-  touch-action: none;
+  /* Холст оверлея управляет жестами рисования через touch-none локально; панели и таймлайн должны оставаться прокручиваемыми на тач-устройствах */
+  touch-action: manipulation;
 }

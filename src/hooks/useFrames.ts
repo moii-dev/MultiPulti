@@ -1,7 +1,11 @@
 import type React from "react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from "../constants/editor";
-import { createBlankFrame as getBlankCanvas } from "../canvas/operations";
+import {
+  calculateAspectFitDimensions,
+  createBlankFrame as getBlankCanvas,
+} from "../canvas/operations";
+import { analyzeFrame } from "../utils/contentFilter";
 import {
   cacheRaster,
   composeFrame,
@@ -34,8 +38,11 @@ interface UseFramesProps {
   activeTextId?: string;
   activeStickerId?: string;
   fps: number;
+  isPlaying?: boolean;
   commitPendingChanges: () => Frame[];
   cancelPendingChanges: () => void;
+  onModerationBlocked?: () => void;
+  onFrameRendered?: (canvas: HTMLCanvasElement) => void;
 }
 
 export function useFrames({
@@ -52,15 +59,22 @@ export function useFrames({
   activeTextId,
   activeStickerId,
   fps,
+  isPlaying = false,
   commitPendingChanges,
   cancelPendingChanges,
+  onModerationBlocked,
+  onFrameRendered,
 }: UseFramesProps) {
   const [draggedFrameIdx, setDraggedFrameIdx] = useState<number | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState<{ current: number; total: number } | null>(null);
   const [canvasError, setCanvasError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const baseBitmapRef = useRef<string | null>(null);
+  const uploadRequestIdRef = useRef(0);
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
 
   const commitObjects = useCallback(
     (objects: CanvasObject[], ownerFrameId: string) => {
@@ -102,6 +116,9 @@ export function useFrames({
         );
         loadedFrameIdRef.current = frame.id;
         setCanvasError(null);
+        if (!isPlayingRef.current) {
+          onFrameRendered?.(canvas);
+        }
       } catch {
         if (!cancelled) setCanvasError("Не удалось отобразить данные кадра");
       }
@@ -241,16 +258,21 @@ export function useFrames({
   const savePng = useCallback(() => {
     playAction();
     const committed = commitPendingChanges();
-    downloadPng(committed[currentFrame].preview);
+    const target = committed[currentFrame] ?? committed[0];
+    if (target?.preview) {
+      downloadPng(target.preview);
+    }
   }, [commitPendingChanges, currentFrame]);
 
   const saveGif = useCallback(async () => {
+    if (isExporting) return;
     if (frames.length <= 1) {
       alert("Нужно больше одного кадра для мультика!");
       return;
     }
     playAction();
     setIsExporting(true);
+    setExportProgress({ current: 0, total: frames.length });
     try {
       const committed = commitPendingChanges();
       await downloadGif(
@@ -258,51 +280,115 @@ export function useFrames({
         fps,
         CANVAS_WIDTH,
         CANVAS_HEIGHT,
+        (current, total) => setExportProgress({ current, total }),
       );
     } catch (e) {
       console.error(e);
-      alert("Ошибка при сохранении GIF");
+      setCanvasError(e instanceof Error ? e.message : "Ошибка при сохранении GIF");
+      playError();
     } finally {
       setIsExporting(false);
+      setExportProgress(null);
     }
-  }, [commitPendingChanges, fps, frames.length]);
+  }, [commitPendingChanges, fps, frames.length, isExporting]);
 
   const handleImageUpload = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
+      if (e.target) {
+        e.target.value = "";
+      }
       if (!file) return;
+
+      if (!file.type.startsWith("image/")) {
+        setCanvasError("Пожалуйста, выбери файл изображения (PNG, JPEG, WebP, GIF)");
+        playError();
+        return;
+      }
+
+      const MAX_SIZE = 15 * 1024 * 1024;
+      if (file.size > MAX_SIZE) {
+        setCanvasError("Файл слишком большой (максимум 15 МБ)");
+        playError();
+        return;
+      }
 
       cancelPendingChanges();
       const target = frames[currentFrame];
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const img = new Image();
-        img.onload = () => {
-          if (getFrames().find((frame) => frame.id === target.id) !== target) return;
-          const canvas = document.createElement("canvas");
-          canvas.width = CANVAS_WIDTH;
-          canvas.height = CANVAS_HEIGHT;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) return;
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          const bitmap = canvas.toDataURL("image/png");
-          saveState((previous) =>
-            previous.map((frame) =>
-              frame.id === target.id
-                ? { ...frame, bitmap, preview: bitmap, objects: [] }
-                : frame,
-            ),
-          );
-          playPop();
-        };
-        img.onerror = () => setCanvasError("Не удалось открыть изображение");
-        img.src = event.target?.result as string;
+      if (!target) return;
+
+      const requestId = ++uploadRequestIdRef.current;
+      const objectUrl = URL.createObjectURL(file);
+      const img = new Image();
+
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        if (requestId !== uploadRequestIdRef.current) return;
+
+        if (img.naturalWidth <= 0 || img.naturalHeight <= 0) {
+          setCanvasError("Не удалось определить размеры изображения");
+          playError();
+          return;
+        }
+
+        if (img.naturalWidth > 8192 || img.naturalHeight > 8192) {
+          setCanvasError("Разрешение изображения слишком велико (максимум 8192×8192)");
+          playError();
+          return;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          setCanvasError("Canvas недоступен");
+          return;
+        }
+
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        const { width: drawWidth, height: drawHeight, x: drawX, y: drawY } =
+          calculateAspectFitDimensions(img.naturalWidth, img.naturalHeight, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+
+        const moderation = analyzeFrame(canvas);
+        if (moderation.blocked) {
+          setCanvasError("Изображение заблокировано фильтром содержимого");
+          playError();
+          onModerationBlocked?.();
+          return;
+        }
+
+        const currentFrames = getFrames();
+        const targetExists = currentFrames.some((frame) => frame.id === target.id);
+        if (!targetExists) return;
+
+        const bitmap = canvas.toDataURL("image/png");
+        saveState((previous) =>
+          previous.map((frame) =>
+            frame.id === target.id
+              ? { ...frame, bitmap, preview: bitmap, objects: [] }
+              : frame,
+          ),
+        );
+        setCanvasError(null);
+        playPop();
       };
-      reader.onerror = () => setCanvasError("Не удалось прочитать файл изображения");
-      reader.readAsDataURL(file);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        if (requestId === uploadRequestIdRef.current) {
+          setCanvasError("Не удалось открыть файл изображения");
+          playError();
+        }
+      };
+
+      img.src = objectUrl;
     },
-    [cancelPendingChanges, currentFrame, frames, getFrames, saveState],
+    [cancelPendingChanges, currentFrame, frames, getFrames, onModerationBlocked, saveState],
   );
 
   const handleDragStart = useCallback(
@@ -339,6 +425,7 @@ export function useFrames({
   return {
     draggedFrameIdx,
     isExporting,
+    exportProgress,
     canvasError,
     fileInputRef,
     commitObjects,

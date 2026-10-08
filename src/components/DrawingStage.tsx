@@ -56,9 +56,9 @@ export function DrawingStage(props: DrawingStageProps) {
     : null;
 
   return (
-    <main className="flex-1 flex items-center justify-center bg-gray-200 p-4 sm:p-8 overflow-hidden relative">
+    <main className="flex-1 flex items-center justify-center bg-gray-200 p-2 sm:p-6 overflow-hidden relative">
       <div
-        className="relative bg-white border-8 border-black rounded-3xl shadow-[8px_8px_0px_0px_rgba(0,0,0,0.2)] overflow-hidden w-full max-w-4xl"
+        className="relative bg-white border-4 sm:border-8 border-black rounded-2xl sm:rounded-3xl shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)] sm:shadow-[8px_8px_0px_0px_rgba(0,0,0,0.2)] overflow-hidden w-full max-w-4xl max-h-full"
         style={{ aspectRatio: "4/3" }}
       >
         <canvas
@@ -98,7 +98,7 @@ export function DrawingStage(props: DrawingStageProps) {
             onKeyDown={(event) => {
               if (event.key === "Enter") props.onFinalizeText();
             }}
-            className="absolute bg-transparent border-2 border-blue-500 border-dashed outline-none p-1 pointer-events-auto z-20 whitespace-pre"
+            className="absolute bg-transparent border-2 border-blue-500 border-dashed outline-none p-1 pointer-events-auto touch-auto z-20 whitespace-pre"
             style={{
               left: `${textGeom.leftPercent}%`,
               top: `${textGeom.topPercent}%`,

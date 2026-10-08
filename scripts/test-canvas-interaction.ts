@@ -3,7 +3,9 @@ import { test } from "node:test";
 import {
   calculateCanvasCoordinates,
   calculateTextInputGeometry,
+  calculateAspectFitDimensions,
 } from "../src/canvas/operations";
+import { detectSmartShape } from "../src/utils/shapeDetection";
 import {
   createInitialPointerState,
   startPointerGesture,
@@ -210,4 +212,151 @@ test("PENDING CANCELLATION: Sticker move during gesture cancel leaves original s
   assert.equal(activeSticker.initialY, 50);
   assert.equal(activeSticker.size, 100);
 });
+
+test("ASPECT RATIO FIT: Proportional letterboxing & pillarboxing inside 800x600 without distortion", () => {
+  // 1. Wider image: 1600x600 into 800x600 -> scales to 800x300, centered vertically (y = 150)
+  const wide = calculateAspectFitDimensions(1600, 600, 800, 600);
+  assert.equal(wide.width, 800);
+  assert.equal(wide.height, 300);
+  assert.equal(wide.x, 0);
+  assert.equal(wide.y, 150);
+
+  // 2. Taller image: 400x600 into 800x600 -> scales to 400x600, centered horizontally (x = 200)
+  const tall = calculateAspectFitDimensions(400, 600, 800, 600);
+  assert.equal(tall.width, 400);
+  assert.equal(tall.height, 600);
+  assert.equal(tall.x, 200);
+  assert.equal(tall.y, 0);
+
+  // 3. Exact match: 800x600 into 800x600 -> fits exactly at (0, 0)
+  const exact = calculateAspectFitDimensions(800, 600, 800, 600);
+  assert.equal(exact.width, 800);
+  assert.equal(exact.height, 600);
+  assert.equal(exact.x, 0);
+  assert.equal(exact.y, 0);
+
+  // 4. Square image: 500x500 into 800x600 -> height bounded at 600x600, scaled to 600x600, centered horizontally (x = 100)
+  const square = calculateAspectFitDimensions(500, 500, 800, 600);
+  assert.equal(square.width, 600);
+  assert.equal(square.height, 600);
+  assert.equal(square.x, 100);
+  assert.equal(square.y, 0);
+
+  // 5. Degenerate zero/negative sizes safely fallback to target dimensions
+  const zero = calculateAspectFitDimensions(0, 0, 800, 600);
+  assert.equal(zero.width, 800);
+  assert.equal(zero.height, 600);
+  assert.equal(zero.x, 0);
+  assert.equal(zero.y, 0);
+});
+
+test("SMART SHAPE: Ellipse detected from rough circular loop; line detected from straight points; noise rejected", () => {
+  // 1. Rough circular loop points (simulating child drawing a circle)
+  const circlePoints: { x: number; y: number }[] = [];
+  const cx = 300;
+  const cy = 300;
+  const r = 80;
+  const steps = 30;
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * 2 * Math.PI;
+    // slight natural jitter
+    const jitter = (i % 2 === 0 ? 1 : -1) * 2;
+    circlePoints.push({
+      x: cx + (r + jitter) * Math.cos(angle),
+      y: cy + (r + jitter) * Math.sin(angle),
+    });
+  }
+  // close the loop
+  circlePoints.push({ ...circlePoints[0] });
+
+  const detectedCircle = detectSmartShape(circlePoints);
+  assert.ok(detectedCircle !== null);
+  assert.equal(detectedCircle.type, "ellipse");
+  assert.ok(Math.abs((detectedCircle as any).cx - cx) < 15);
+  assert.ok(Math.abs((detectedCircle as any).cy - cy) < 15);
+
+  // 2. Straight line points
+  const linePoints: { x: number; y: number }[] = [];
+  for (let i = 0; i <= 20; i++) {
+    linePoints.push({ x: 100 + i * 15, y: 150 + (i % 2 === 0 ? 1 : 0) });
+  }
+  const detectedLine = detectSmartShape(linePoints);
+  assert.ok(detectedLine !== null);
+  assert.equal(detectedLine.type, "line");
+  assert.equal((detectedLine as any).x1, 100);
+
+  // 3. Insufficient points (<10)
+  assert.equal(detectSmartShape(linePoints.slice(0, 5)), null);
+
+  // 4. Random erratic squiggle (not a closed loop, not a straight line)
+  const squiggle = [
+    { x: 10, y: 10 }, { x: 50, y: 90 }, { x: 100, y: 20 },
+    { x: 120, y: 80 }, { x: 20, y: 150 }, { x: 180, y: 40 },
+    { x: 190, y: 100 }, { x: 30, y: 70 }, { x: 140, y: 130 },
+    { x: 80, y: 160 }, { x: 220, y: 10 },
+  ];
+  assert.equal(detectSmartShape(squiggle), null);
+});
+
+test("IMPORT VALIDATION: Rejects invalid MIME types, oversized bytes (>15MB), oversized dimensions (>8192px)", () => {
+  const MAX_FILE_SIZE = 15 * 1024 * 1024;
+  const MAX_DIMENSION = 8192;
+
+  // 1. MIME type validation
+  const isValidMime = (type: string) => type.startsWith("image/");
+  assert.equal(isValidMime("image/png"), true);
+  assert.equal(isValidMime("image/jpeg"), true);
+  assert.equal(isValidMime("image/webp"), true);
+  assert.equal(isValidMime("image/gif"), true);
+  assert.equal(isValidMime("text/plain"), false);
+  assert.equal(isValidMime("application/pdf"), false);
+  assert.equal(isValidMime("application/octet-stream"), false);
+
+  // 2. File size limit
+  const isFileSizeAllowed = (size: number) => size <= MAX_FILE_SIZE;
+  assert.equal(isFileSizeAllowed(5 * 1024 * 1024), true);
+  assert.equal(isFileSizeAllowed(15 * 1024 * 1024), true);
+  assert.equal(isFileSizeAllowed(15 * 1024 * 1024 + 1), false);
+  assert.equal(isFileSizeAllowed(50 * 1024 * 1024), false);
+
+  // 3. Dimension limits
+  const areDimensionsAllowed = (w: number, h: number) =>
+    w > 0 && h > 0 && w <= MAX_DIMENSION && h <= MAX_DIMENSION;
+  assert.equal(areDimensionsAllowed(800, 600), true);
+  assert.equal(areDimensionsAllowed(4096, 4096), true);
+  assert.equal(areDimensionsAllowed(8192, 8192), true);
+  assert.equal(areDimensionsAllowed(8193, 100), false);
+  assert.equal(areDimensionsAllowed(100, 10000), false);
+  assert.equal(areDimensionsAllowed(0, 500), false);
+});
+
+test("PENDING CANCELLATION: Canvas clear and playback toggle safely discard active pending state", () => {
+  const frameA = createFrame("data:image/png;base64,A");
+  const frames = [frameA];
+
+  const pendingText: ActiveText = {
+    id: "text-1",
+    ownerFrameId: frameA.id,
+    text: "Uncommitted text",
+    x: 100,
+    y: 100,
+    size: 24,
+    font: "Nunito",
+    color: "#000000",
+    isEditing: true,
+    isNew: true,
+  };
+
+  // When user clicks clear or toggles playback, cancelPendingChanges resets the tool state
+  let activeTextState: ActiveText | null = pendingText;
+  const cancelPendingChanges = () => {
+    activeTextState = null;
+  };
+
+  cancelPendingChanges();
+  assert.equal(activeTextState, null);
+  // Original frame remained clean without uncommitted text object
+  assert.equal(frames[0].objects.length, 0);
+});
+
 

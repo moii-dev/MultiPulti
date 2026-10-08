@@ -72,13 +72,15 @@ function checkAggressivePalette(
   const otherRatio = otherColorPixels / totalDrawn;
 
   // Палитра подозрительна только когда черный и красный почти полностью вытесняют все остальные цвета.
+  // Само по себе наличие черного и красного не блокирует рисунок (божья коровка, машина),
+  // но служит сигналом в комбинации с опасными фигурами.
   if (
     blackCount > 100 &&
     redCount > 100 &&
     aggressiveRatio > 0.85 &&
     otherRatio < 0.1
   ) {
-    const score = Math.min(100, Math.round(aggressiveRatio * 80));
+    const score = Math.min(40, Math.round(aggressiveRatio * 40));
     return { isAggressive: true, score };
   }
 
@@ -112,9 +114,18 @@ function detectCrossPattern(imageData: ImageData): {
     }
   }
 
-  const directions = [
+  interface ScanDirection {
+    dx: number;
+    dy: number;
+    name: string;
+    type?: "aspect-down-right" | "aspect-up-right";
+  }
+
+  const directions: ScanDirection[] = [
     { dx: 1, dy: 1, name: "diag-down-right" },
     { dx: 1, dy: -1, name: "diag-up-right" },
+    { dx: 1, dy: 1, name: "aspect-diag-down-right", type: "aspect-down-right" },
+    { dx: 1, dy: -1, name: "aspect-diag-up-right", type: "aspect-up-right" },
     { dx: 1, dy: 0, name: "horizontal" },
     { dx: 0, dy: 1, name: "vertical" },
   ];
@@ -123,6 +134,10 @@ function detectCrossPattern(imageData: ImageData): {
     dir: string;
     midX: number;
     midY: number;
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
   }
 
   const significantLines: Line[] = [];
@@ -138,6 +153,7 @@ function detectCrossPattern(imageData: ImageData): {
         let currentGap = 0;
         let cx = sx;
         let cy = sy;
+        let step = 0;
 
         while (
           cx >= 0 && cx < sw &&
@@ -151,17 +167,31 @@ function detectCrossPattern(imageData: ImageData): {
             gaps++;
             if (currentGap > 3) break;
           }
-          cx += dir.dx;
-          cy += dir.dy;
+
+          if (dir.type === "aspect-down-right") {
+            cx += 1;
+            if (step % 4 !== 3) cy += 1;
+          } else if (dir.type === "aspect-up-right") {
+            cx += 1;
+            if (step % 4 !== 3) cy -= 1;
+          } else {
+            cx += dir.dx;
+            cy += dir.dy;
+          }
+          step++;
         }
 
         if (length >= minLineLength && gaps / (length + gaps) < 0.3) {
-          const endX = cx - dir.dx;
-          const endY = cy - dir.dy;
+          const endX = cx - (dir.type ? 1 : dir.dx);
+          const endY = cy - (dir.type ? 1 : dir.dy);
           significantLines.push({
             dir: dir.name,
             midX: (sx + endX) / 2,
             midY: (sy + endY) / 2,
+            startX: sx,
+            startY: sy,
+            endX,
+            endY,
           });
         }
       }
@@ -181,28 +211,51 @@ function detectCrossPattern(imageData: ImageData): {
       const tolerance = Math.min(sw, sh) * 0.15;
 
       if (dist < tolerance) {
+        // Проверяем, что пересечение образовано тонкими изолированными штрихами (крест/X),
+        // а не хордами сплошного круга/диска/травы/фона
+        const bMinX = Math.min(a.startX, a.endX, b.startX, b.endX);
+        const bMaxX = Math.max(a.startX, a.endX, b.startX, b.endX);
+        const bMinY = Math.min(a.startY, a.endY, b.startY, b.endY);
+        const bMaxY = Math.max(a.startY, a.endY, b.startY, b.endY);
+        const bW = bMaxX - bMinX + 1;
+        const bH = bMaxY - bMinY + 1;
+        if (bW > 5 && bH > 5) {
+          let drawnInBox = 0;
+          for (let by = bMinY; by <= bMaxY; by++) {
+            for (let bx = bMinX; bx <= bMaxX; bx++) {
+              if (binary[by]?.[bx]) drawnInBox++;
+            }
+          }
+          const boxDensity = drawnInBox / (bW * bH);
+          if (boxDensity > 0.4) {
+            // Это сплошная фигура (круг, диск, прямоугольник), а не крестообразные штрихи
+            continue;
+          }
+        }
+        const isDiagA = a.dir.includes("diag-down-right");
+        const isDiagB = b.dir.includes("diag-up-right");
         const isDiagCross =
-          (a.dir === "diag-down-right" && b.dir === "diag-up-right") ||
-          (a.dir === "diag-up-right" && b.dir === "diag-down-right");
+          (isDiagA && isDiagB) ||
+          (a.dir.includes("diag-up-right") && b.dir.includes("diag-down-right"));
 
         const isOrthoCross =
           (a.dir === "horizontal" && b.dir === "vertical") ||
           (a.dir === "vertical" && b.dir === "horizontal");
 
         if (isDiagCross) {
-          crossScore = Math.max(crossScore, 70);
+          crossScore = Math.max(crossScore, 45);
         } else if (isOrthoCross) {
           // Плюс часто бывает частью обычного рисунка, поэтому сам по себе он слабый сигнал.
-          crossScore = Math.max(crossScore, 30);
-        } else {
           crossScore = Math.max(crossScore, 20);
+        } else {
+          crossScore = Math.max(crossScore, 15);
         }
       }
     }
   }
 
   return {
-    hasCross: crossScore >= 50,
+    hasCross: crossScore >= 35,
     score: crossScore,
   };
 }
@@ -260,8 +313,8 @@ function detectScribblePattern(imageData: ImageData): {
   }
   const variance = varianceSum / (sectorsX * sectorsY);
 
-  if (avgDensity > 0.4 && sectorFillRatio > 0.7 && variance > 0.01 && variance < 0.15) {
-    const score = Math.min(100, Math.round(avgDensity * 60 + sectorFillRatio * 30));
+  if (avgDensity > 0.25 && sectorFillRatio >= 0.5 && variance > 0.005 && variance < 0.25) {
+    const score = Math.min(35, Math.round(avgDensity * 35 + sectorFillRatio * 15));
     return { isScribble: true, score };
   }
 
@@ -292,11 +345,22 @@ function detectRotationalSymmetry(imageData: ImageData): {
   // Четырехкратная симметрия сама по себе не запрещена, но усиливает общий риск вместе с цветом и формой.
   let matchCount = 0;
   let totalChecked = 0;
+  let drawnCount = 0;
+  let minX = sw;
+  let maxX = 0;
+  let minY = sh;
+  let maxY = 0;
 
   for (let y = 0; y < sh; y++) {
     for (let x = 0; x < sw; x++) {
       const val = getBin(x, y);
       if (val === 0) continue;
+
+      drawnCount++;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
 
       const rx = cx + (y - cy);
       const ry = cy - (x - cx);
@@ -312,10 +376,18 @@ function detectRotationalSymmetry(imageData: ImageData): {
     }
   }
 
+  const bboxArea = (maxX - minX + 1) * (maxY - minY + 1);
+  const fillDensity = bboxArea > 0 ? drawnCount / bboxArea : 0;
+  // Сплошные круглые/прямоугольные объекты (мяч, колесо, божья коровка) имеют высокую плотность (> 0.45)
+  // и не должны определяться как подозрительная симметрия тонких символов.
+  if (fillDensity > 0.45) {
+    return { hasSymmetry: false, score: 0 };
+  }
+
   const symmetryRatio = totalChecked > 50 ? matchCount / totalChecked : 0;
 
   if (symmetryRatio > 0.6 && totalChecked > 100) {
-    return { hasSymmetry: true, score: Math.round(symmetryRatio * 50) };
+    return { hasSymmetry: true, score: Math.round(symmetryRatio * 35) };
   }
 
   return { hasSymmetry: false, score: 0 };
@@ -360,11 +432,19 @@ export function analyzeImageData(imageData: ImageData): FilterResult {
 
   // Комбинации признаков важнее одиночных совпадений: так меньше ложных блокировок обычных рисунков.
   if (paletteCheck.isAggressive && crossCheck.hasCross) {
-    totalScore += 30;
+    totalScore += 35;
   }
 
   if (paletteCheck.isAggressive && scribbleCheck.isScribble) {
-    totalScore += 20;
+    totalScore += 30;
+  }
+
+  if (paletteCheck.isAggressive && symmetryCheck.hasSymmetry) {
+    totalScore += 30;
+  }
+
+  if (crossCheck.hasCross && scribbleCheck.isScribble) {
+    totalScore += 25;
   }
 
   const severity = Math.min(100, totalScore);

@@ -63,6 +63,23 @@ export function calculateTextInputGeometry(
   };
 }
 
+export function calculateAspectFitDimensions(
+  srcWidth: number,
+  srcHeight: number,
+  maxWidth: number,
+  maxHeight: number,
+): { width: number; height: number; x: number; y: number } {
+  if (srcWidth <= 0 || srcHeight <= 0 || maxWidth <= 0 || maxHeight <= 0) {
+    return { width: maxWidth, height: maxHeight, x: 0, y: 0 };
+  }
+  const scale = Math.min(maxWidth / srcWidth, maxHeight / srcHeight);
+  const width = Math.round(srcWidth * scale);
+  const height = Math.round(srcHeight * scale);
+  const x = Math.round((maxWidth - width) / 2);
+  const y = Math.round((maxHeight - height) / 2);
+  return { width, height, x, y };
+}
+
 export function createBlankFrame() {
   const canvas = document.createElement("canvas");
   canvas.width = CANVAS_WIDTH;
