@@ -64,11 +64,18 @@ export interface StoredAppState {
 }
 
 export interface ActiveSelection {
+  ownerFrameId?: string;
   canvas: HTMLCanvasElement;
   x: number;
   y: number;
   width: number;
   height: number;
+  initialX?: number;
+  initialY?: number;
+  initialWidth?: number;
+  initialHeight?: number;
+  originalBitmap?: string;
+  hasChanged?: boolean;
 }
 
 export interface ActiveSticker {
@@ -78,6 +85,11 @@ export interface ActiveSticker {
   x: number;
   y: number;
   size: number;
+  initialX?: number;
+  initialY?: number;
+  initialSize?: number;
+  initialEmoji?: string;
+  isNew?: boolean;
 }
 
 export interface ActiveText {
@@ -90,6 +102,13 @@ export interface ActiveText {
   font: string;
   color: string;
   isEditing: boolean;
+  initialText?: string;
+  initialX?: number;
+  initialY?: number;
+  initialSize?: number;
+  initialFont?: string;
+  initialColor?: string;
+  isNew?: boolean;
 }
 
 export interface EditorContextMenu {
@@ -136,4 +155,3 @@ export interface CanvasClientPosition {
   clientX: number;
   clientY: number;
 }
-

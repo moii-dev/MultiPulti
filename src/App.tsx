@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { floodFill } from "./utils/floodFill";
-import { extractObject, extractObjectInRect } from "./utils/extractObject";
+import { findConnectedObject, findObjectInRect, eraseObjectPixels } from "./utils/extractObject";
 import { detectSmartShape } from "./utils/shapeDetection";
 import { playPop, playSwoosh, playAction, playError } from "./utils/audio";
 import { DrawingStage } from "./components/DrawingStage";
@@ -22,6 +22,10 @@ import { downloadGif, downloadPng } from "./services/imageExport";
 import { readPreferences } from "./services/projectRepository";
 import { useProjectLoader } from "./hooks/useProjectLoader";
 import { createFrame, createId, copyFrame as cloneFrame, deleteFrame as removeFrame, reorderFrame, upsertObject } from "./domain/project";
+import {
+  commitStickerToFrame, commitTextToFrame, hasSelectionChanged,
+  hasStickerChanged, hasTextChanged,
+} from "./domain/transaction";
 import { composeFrame, drawObjects, hitObject, cacheRaster, loadRasterLayers, pruneRasterCache } from "./canvas/frameRenderer";
 import { useAnimationPlayback } from "./hooks/useAnimationPlayback";
 import { useFrameHistory } from "./hooks/useFrameHistory";
@@ -30,7 +34,7 @@ import { useContentModeration } from "./hooks/useContentModeration";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import type {
   ActiveSelection, ActiveSticker, ActiveText, CanvasClientPosition,
-  EditorContextMenu, Point, ShapeId, ToolId, CanvasObject, StoredAppState,
+  EditorContextMenu, Point, ShapeId, ToolId, CanvasObject, StoredAppState, Frame,
 } from "./types/editor";
 
 
@@ -115,13 +119,22 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
 
   const [contextMenu, setContextMenu] = useState<EditorContextMenu | null>(null);
 
-
   const isMovingSelectionRef = useRef(false);
   const isBoxSelectingRef = useRef(false);
   const selectionStartRef = useRef({ x: 0, y: 0 });
   const initialSelectionPosRef = useRef({ x: 0, y: 0 });
 
   const [draggedFrameIdx, setDraggedFrameIdx] = useState<number | null>(null);
+
+  // References to keep callbacks immune to stale React closures
+  const activeSelectionRef = useRef(activeSelection);
+  activeSelectionRef.current = activeSelection;
+  const activeTextRef = useRef(activeText);
+  activeTextRef.current = activeText;
+  const activeStickerRef = useRef(activeSticker);
+  activeStickerRef.current = activeSticker;
+  const currentFrameRef = useRef(currentFrame);
+  currentFrameRef.current = currentFrame;
 
   const { isPlaying, setIsPlaying, fps, setFps } = useAnimationPlayback(
     frames.length,
@@ -137,10 +150,248 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
   }, []);
 
+  const commitObjects = useCallback((objects: CanvasObject[], ownerFrameId: string) => {
+    const base = baseCanvasRef.current;
+    if (!base || loadedFrameIdRef.current !== ownerFrameId) return;
+    const preview = composeFrame(base, objects);
+    saveState(previous => previous.map(frame => frame.id === ownerFrameId ? { ...frame, objects, preview } : frame));
+  }, [saveState]);
+
+  const commitSelectionChange = useCallback((updatedSelection: ActiveSelection) => {
+    const ownerFrameId = updatedSelection.ownerFrameId ?? frames[currentFrameRef.current]?.id;
+    if (!ownerFrameId) return;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = CANVAS_WIDTH;
+    canvas.height = CANVAS_HEIGHT;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    if (baseCanvasRef.current && loadedFrameIdRef.current === ownerFrameId) {
+      ctx.drawImage(baseCanvasRef.current, 0, 0);
+    }
+    ctx.drawImage(
+      updatedSelection.canvas,
+      updatedSelection.x,
+      updatedSelection.y,
+      updatedSelection.width,
+      updatedSelection.height
+    );
+    const newBitmap = canvas.toDataURL("image/png");
+
+    saveState(prev => prev.map(f => f.id === ownerFrameId ? { ...f, bitmap: newBitmap, preview: newBitmap } : f));
+
+    if (baseCanvasRef.current && loadedFrameIdRef.current === ownerFrameId) {
+      const baseCtx = baseCanvasRef.current.getContext("2d");
+      if (baseCtx) {
+        baseCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        baseCtx.drawImage(canvas, 0, 0);
+      }
+    }
+
+    setActiveSelection({
+      ...updatedSelection,
+      initialX: updatedSelection.x,
+      initialY: updatedSelection.y,
+      initialWidth: updatedSelection.width,
+      initialHeight: updatedSelection.height,
+      originalBitmap: newBitmap,
+      hasChanged: false,
+    });
+  }, [frames, saveState]);
+
+  const commitStickerChange = useCallback((updatedSticker: ActiveSticker) => {
+    const ownerFrameId = updatedSticker.ownerFrameId ?? frames[currentFrameRef.current]?.id;
+    if (!ownerFrameId) return;
+    const frame = frames.find(f => f.id === ownerFrameId);
+    if (!frame) return;
+
+    const updated = commitStickerToFrame(frame, updatedSticker);
+    if (baseCanvasRef.current && loadedFrameIdRef.current === ownerFrameId) {
+      updated.preview = composeFrame(baseCanvasRef.current, updated.objects);
+    }
+    saveState(prev => prev.map(f => f.id === ownerFrameId ? updated : f));
+    setActiveSticker({
+      ...updatedSticker,
+      initialX: updatedSticker.x,
+      initialY: updatedSticker.y,
+      initialSize: updatedSticker.size,
+      initialEmoji: updatedSticker.emoji,
+      isNew: false,
+    });
+  }, [frames, saveState]);
+
+  const commitTextChange = useCallback((updatedText: ActiveText) => {
+    const ownerFrameId = updatedText.ownerFrameId ?? frames[currentFrameRef.current]?.id;
+    if (!ownerFrameId) return;
+    const frame = frames.find(f => f.id === ownerFrameId);
+    if (!frame) return;
+
+    const ctx = mainCanvasRef.current?.getContext("2d");
+    let w = updatedText.size * updatedText.text.length * 0.6;
+    if (ctx) {
+      ctx.save();
+      ctx.font = `${updatedText.size}px ${updatedText.font}`;
+      w = ctx.measureText(updatedText.text).width;
+      ctx.restore();
+    }
+    const updated = commitTextToFrame(frame, updatedText, w);
+    if (baseCanvasRef.current && loadedFrameIdRef.current === ownerFrameId) {
+      updated.preview = composeFrame(baseCanvasRef.current, updated.objects);
+    }
+    saveState(prev => prev.map(f => f.id === ownerFrameId ? updated : f));
+    setActiveText({
+      ...updatedText,
+      initialText: updatedText.text,
+      initialX: updatedText.x,
+      initialY: updatedText.y,
+      initialSize: updatedText.size,
+      initialFont: updatedText.font,
+      initialColor: updatedText.color,
+      isNew: false,
+    });
+  }, [frames, saveState]);
+
+  const cancelPendingChanges = useCallback(() => {
+    const sel = activeSelectionRef.current;
+    if (sel && sel.originalBitmap && baseCanvasRef.current && loadedFrameIdRef.current === sel.ownerFrameId) {
+      const img = new Image();
+      img.onload = () => {
+        const baseCtx = baseCanvasRef.current?.getContext("2d");
+        const mainCtx = mainCanvasRef.current?.getContext("2d", { willReadFrequently: true });
+        if (baseCtx) {
+          baseCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+          baseCtx.drawImage(img, 0, 0);
+        }
+        if (mainCtx) {
+          mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+          mainCtx.drawImage(img, 0, 0);
+          const frame = frames.find(f => f.id === sel.ownerFrameId);
+          if (frame) drawObjects(mainCtx, frame.objects);
+        }
+      };
+      img.src = sel.originalBitmap;
+    }
+    setActiveText(null);
+    setTextInput("");
+    setActiveSticker(null);
+    setActiveSelection(null);
+    isDrawingRef.current = false;
+    isMovingTextRef.current = false;
+    isMovingStickerRef.current = false;
+    isResizingStickerRef.current = false;
+    isMovingSelectionRef.current = false;
+    isBoxSelectingRef.current = false;
+    clearOverlayCanvas();
+  }, [clearOverlayCanvas, frames]);
+
+  const commitPendingChanges = useCallback((): Frame[] => {
+    let currentFrames = getFrames();
+    let changed = false;
+
+    // 1. Text
+    const text = activeTextRef.current;
+    if (text) {
+      const ownerId = text.ownerFrameId ?? currentFrames[currentFrameRef.current]?.id;
+      const targetFrame = currentFrames.find(f => f.id === ownerId);
+      if (targetFrame && hasTextChanged(text)) {
+        const ctx = mainCanvasRef.current?.getContext("2d");
+        let w = text.size * text.text.length * 0.6;
+        if (ctx) {
+          ctx.save();
+          ctx.font = `${text.size}px ${text.font}`;
+          w = ctx.measureText(text.text).width;
+          ctx.restore();
+        }
+        const updated = commitTextToFrame(targetFrame, text, w);
+        if (baseCanvasRef.current && loadedFrameIdRef.current === ownerId) {
+          updated.preview = composeFrame(baseCanvasRef.current, updated.objects);
+        }
+        currentFrames = currentFrames.map(f => f.id === ownerId ? updated : f);
+        changed = true;
+      }
+      setActiveText(null);
+      setTextInput("");
+    }
+
+    // 2. Sticker
+    const sticker = activeStickerRef.current;
+    if (sticker) {
+      const ownerId = sticker.ownerFrameId ?? currentFrames[currentFrameRef.current]?.id;
+      const targetFrame = currentFrames.find(f => f.id === ownerId);
+      if (targetFrame && hasStickerChanged(sticker)) {
+        const updated = commitStickerToFrame(targetFrame, sticker);
+        if (baseCanvasRef.current && loadedFrameIdRef.current === ownerId) {
+          updated.preview = composeFrame(baseCanvasRef.current, updated.objects);
+        }
+        currentFrames = currentFrames.map(f => f.id === ownerId ? updated : f);
+        changed = true;
+      }
+      setActiveSticker(null);
+    }
+
+    // 3. Selection
+    const sel = activeSelectionRef.current;
+    if (sel) {
+      const ownerId = sel.ownerFrameId ?? currentFrames[currentFrameRef.current]?.id;
+      const targetFrame = currentFrames.find(f => f.id === ownerId);
+      if (targetFrame) {
+        if (hasSelectionChanged(sel)) {
+          const canvas = document.createElement("canvas");
+          canvas.width = CANVAS_WIDTH;
+          canvas.height = CANVAS_HEIGHT;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            if (baseCanvasRef.current && loadedFrameIdRef.current === ownerId) {
+              ctx.drawImage(baseCanvasRef.current, 0, 0);
+            }
+            ctx.drawImage(sel.canvas, sel.x, sel.y, sel.width, sel.height);
+            const newBitmap = canvas.toDataURL("image/png");
+            const updated = { ...targetFrame, bitmap: newBitmap, preview: newBitmap };
+            currentFrames = currentFrames.map(f => f.id === ownerId ? updated : f);
+            changed = true;
+            if (baseCanvasRef.current && loadedFrameIdRef.current === ownerId) {
+              const baseCtx = baseCanvasRef.current.getContext("2d");
+              if (baseCtx) {
+                baseCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                baseCtx.drawImage(canvas, 0, 0);
+              }
+            }
+          }
+        } else if (sel.originalBitmap) {
+          if (baseCanvasRef.current && loadedFrameIdRef.current === ownerId) {
+            const img = new Image();
+            img.onload = () => {
+              const baseCtx = baseCanvasRef.current?.getContext("2d");
+              const mainCtx = mainCanvasRef.current?.getContext("2d", { willReadFrequently: true });
+              if (baseCtx) {
+                baseCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                baseCtx.drawImage(img, 0, 0);
+              }
+              if (mainCtx) {
+                mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                mainCtx.drawImage(img, 0, 0);
+                drawObjects(mainCtx, targetFrame.objects);
+              }
+            };
+            img.src = sel.originalBitmap;
+          }
+        }
+      }
+      setActiveSelection(null);
+    }
+
+    clearOverlayCanvas();
+
+    if (changed) {
+      saveState(currentFrames);
+    }
+    return currentFrames;
+  }, [getFrames, clearOverlayCanvas, saveState]);
+
   const handleDragStart = (e: React.DragEvent, idx: number) => {
     setDraggedFrameIdx(idx);
     e.dataTransfer.effectAllowed = "move";
-    // Firefox не запускает drag-and-drop без данных, даже если они не нужны приложению.
     e.dataTransfer.setData("text/plain", idx.toString());
   };
 
@@ -153,7 +404,7 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
     e.preventDefault();
     if (draggedFrameIdx === null || draggedFrameIdx === dropIdx) return;
 
-    const committed = finalizePending();
+    const committed = commitPendingChanges();
     saveState(reorderFrame(committed, frames[draggedFrameIdx].id, dropIdx));
     setDraggedFrameIdx(null);
     playPop();
@@ -178,115 +429,39 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
       onErrorSound: playError,
     });
 
+  const handleUndo = useCallback(() => {
+    if (isPlaying) return;
+    cancelPendingChanges();
+    if (historyIndex > 0) {
+      playPop();
+      setHistoryIndex(historyIndex - 1);
+    }
+  }, [isPlaying, cancelPendingChanges, historyIndex, setHistoryIndex]);
+
+  const handleRedo = useCallback(() => {
+    if (isPlaying) return;
+    cancelPendingChanges();
+    if (historyIndex < history.length - 1) {
+      playPop();
+      setHistoryIndex(historyIndex + 1);
+    }
+  }, [isPlaying, cancelPendingChanges, historyIndex, history.length, setHistoryIndex]);
+
   useKeyboardShortcuts({
     canUndo: historyIndex > 0 && !isPlaying,
     canRedo: historyIndex < history.length - 1 && !isPlaying,
-    onUndo: () => {
-      playPop();
-      changeHistory(Math.max(0, historyIndex - 1));
-    },
-    onRedo: () => {
-      playPop();
-      changeHistory(Math.min(history.length - 1, historyIndex + 1));
-    },
+    onUndo: handleUndo,
+    onRedo: handleRedo,
   });
-
-
-
-  const commitObjects = useCallback((objects: CanvasObject[], ownerFrameId: string) => {
-    const base = baseCanvasRef.current;
-    if (!base || loadedFrameIdRef.current !== ownerFrameId) return;
-    const preview = composeFrame(base, objects);
-    saveState(previous => previous.map(frame => frame.id === ownerFrameId ? { ...frame, objects, preview } : frame));
-  }, [saveState]);
-
-  const finalizeSticker = useCallback(() => {
-    if (!activeSticker) return;
-    const owner = activeSticker.ownerFrameId ?? frames[currentFrame].id;
-    const frame = frames.find(frame => frame.id === owner);
-    if (frame) commitObjects(upsertObject(frame.objects, {
-      kind: "sticker", id: activeSticker.id ?? createId(), emoji: activeSticker.emoji,
-      x: activeSticker.x, y: activeSticker.y, size: activeSticker.size,
-    }), owner);
-    setActiveSticker(null);
-    clearOverlayCanvas();
-    playPop();
-  }, [activeSticker, frames, currentFrame, commitObjects, clearOverlayCanvas]);
-
-  const finalizeText = useCallback(() => {
-    if (!activeText) return;
-    const owner = activeText.ownerFrameId ?? frames[currentFrame].id;
-    const frame = frames.find(frame => frame.id === owner);
-    const ctx = mainCanvasRef.current?.getContext("2d");
-    if (frame && ctx) {
-      let objects = frame.objects;
-      if (activeText.text.trim()) {
-        ctx.font = `${activeText.size}px ${activeText.font}`;
-        objects = upsertObject(objects, { kind: "text", id: activeText.id ?? createId(), x: activeText.x, y: activeText.y,
-          size: activeText.size, w: ctx.measureText(activeText.text).width, h: activeText.size,
-          text: activeText.text, font: activeText.font, color: activeText.color });
-      } else {
-        objects = objects.filter(object => object.id !== activeText.id);
-      }
-      commitObjects(objects, owner);
-    }
-    setActiveText(null);
-    setTextInput("");
-    clearOverlayCanvas();
-    playPop();
-  }, [activeText, frames, currentFrame, commitObjects, clearOverlayCanvas]);
-
-  const finalizeSelection = useCallback(() => {
-    if (!activeSelection) return;
-    const mainCanvas = mainCanvasRef.current;
-    const mainCtx = mainCanvas?.getContext("2d", { willReadFrequently: true });
-    if (!mainCanvas || !mainCtx) return;
-
-    mainCtx.drawImage(
-      activeSelection.canvas,
-      activeSelection.x,
-      activeSelection.y,
-      activeSelection.width,
-      activeSelection.height
-    );
-
-    saveCanvasSnapshot(mainCanvas);
-
-    setActiveSelection(null);
-    clearOverlayCanvas();
-    playPop();
-  }, [activeSelection, clearOverlayCanvas, saveCanvasSnapshot]);
-
-  const cancelSticker = useCallback(() => {
-    setActiveSticker(null);
-    clearOverlayCanvas();
-    playPop();
-  }, [clearOverlayCanvas]);
 
   const handleSetTool = useCallback(
     (newTool: ToolId) => {
-      if (tool === "sticker" && newTool !== "sticker" && activeSticker) {
-        finalizeSticker();
-      }
-      if (tool === "text" && newTool !== "text" && activeText && newTool !== "select") {
-        finalizeText();
-      }
-      if (tool === "select" && newTool !== "select") {
-        if (activeSelection) finalizeSelection();
-        if (activeText) finalizeText();
-        if (activeSticker) finalizeSticker();
+      if (newTool !== tool) {
+        commitPendingChanges();
       }
       setTool(newTool);
     },
-    [
-      tool,
-      activeSticker,
-      activeText,
-      activeSelection,
-      finalizeSticker,
-      finalizeText,
-      finalizeSelection,
-    ],
+    [tool, commitPendingChanges],
   );
 
   const activatePipette = useCallback(() => {
@@ -337,26 +512,10 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
     return () => { cancelled = true; };
   }, [frames, currentFrame, activeText?.id, activeSticker?.id]);
 
-  const clearPending = useCallback(() => {
-    setActiveText(null); setTextInput(""); setActiveSticker(null); setActiveSelection(null);
-    isDrawingRef.current = false;
-    isMovingTextRef.current = false; isMovingStickerRef.current = false;
-    isResizingStickerRef.current = false; isMovingSelectionRef.current = false;
-    isBoxSelectingRef.current = false;
-    clearOverlayCanvas();
-  }, [clearOverlayCanvas]);
-  useEffect(clearPending, [frames[currentFrame].id, clearPending]);
   useEffect(() => {
     pruneRasterCache(history.flatMap(entry => entry.frames));
   }, [history]);
 
-  const finalizePending = () => {
-    if (activeText) finalizeText();
-    if (activeSticker) finalizeSticker();
-    if (activeSelection) finalizeSelection();
-    return getFrames();
-  };
-  const changeHistory = (index: number) => { clearPending(); setHistoryIndex(index); };
   const saveRasterOverlay = (overlay: HTMLCanvasElement) => {
     const frame = frames[currentFrame];
     const base = baseCanvasRef.current;
@@ -392,18 +551,20 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
     const newH = activeSelection.height * factor;
     const dx = (activeSelection.width - newW) / 2;
     const dy = (activeSelection.height - newH) / 2;
-    
+
     if (newW < 10 || newH < 10 || newW > CANVAS_WIDTH * 2 || newH > CANVAS_HEIGHT * 2) return;
 
-    setActiveSelection({
+    const updated: ActiveSelection = {
       ...activeSelection,
       width: newW,
       height: newH,
       x: activeSelection.x + dx,
       y: activeSelection.y + dy,
-    });
+      hasChanged: true,
+    };
+    commitSelectionChange(updated);
     playPop();
-  }, [activeSelection]);
+  }, [activeSelection, commitSelectionChange]);
 
   const flipSelection = useCallback(() => {
     if (!activeSelection) return;
@@ -423,9 +584,13 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(temp, 0, 0);
     }
-    setActiveSelection({ ...activeSelection });
+    const updated: ActiveSelection = {
+      ...activeSelection,
+      hasChanged: true,
+    };
+    commitSelectionChange(updated);
     playAction();
-  }, [activeSelection]);
+  }, [activeSelection, commitSelectionChange]);
 
   const tintSelection = useCallback((colorHex: string, silent = false) => {
     if (!activeSelection) return;
@@ -437,10 +602,14 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
     ctx.fillStyle = colorHex;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.globalCompositeOperation = 'source-over';
-    
-    setActiveSelection({ ...activeSelection });
+
+    const updated: ActiveSelection = {
+      ...activeSelection,
+      hasChanged: true,
+    };
+    commitSelectionChange(updated);
     if (!silent) playPop();
-  }, [activeSelection]);
+  }, [activeSelection, commitSelectionChange]);
 
   const getCoordinates = (event: CanvasClientPosition) =>
     getCanvasCoordinates(mainCanvasRef.current, event);
@@ -470,15 +639,35 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
 
     e.currentTarget.setPointerCapture(e.pointerId);
 
+    // Hit test semantic objects first
     if ((tool === "select" || tool === "text" || tool === "sticker") && !activeText && !activeSticker && !activeSelection) {
       const object = hitObject(mainCtx, frames[currentFrame], x, y);
       if (object && object.kind !== "raster") {
         if (object.kind === "text") {
-          setActiveText({ ...object, ownerFrameId: frames[currentFrame].id, isEditing: tool === "text" });
+          setActiveText({
+            ...object,
+            ownerFrameId: frames[currentFrame].id,
+            isEditing: tool === "text",
+            initialText: object.text,
+            initialX: object.x,
+            initialY: object.y,
+            initialSize: object.size,
+            initialFont: object.font,
+            initialColor: object.color,
+            isNew: false,
+          });
           setTextInput(object.text);
           setSelectedFont(object.font as FontName);
         } else {
-          setActiveSticker({ ...object, ownerFrameId: frames[currentFrame].id });
+          setActiveSticker({
+            ...object,
+            ownerFrameId: frames[currentFrame].id,
+            initialX: object.x,
+            initialY: object.y,
+            initialSize: object.size,
+            initialEmoji: object.emoji,
+            isNew: false,
+          });
           setTool("sticker");
         }
         playPop();
@@ -501,7 +690,7 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
           initialTextPosRef.current = { x: activeText.x, y: activeText.y };
           return;
         } else {
-          finalizeText();
+          commitPendingChanges();
         }
       }
 
@@ -515,21 +704,35 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
           };
           return;
         } else {
-          finalizeSelection();
+          commitPendingChanges();
         }
       }
 
-      const extractedObject = extractObject(mainCtx, x, y);
+      const extractedObject = findConnectedObject(mainCtx, x, y);
       if (extractedObject) {
-        setActiveSelection(extractedObject);
+        const originalBitmap = frames[currentFrame].bitmap;
+        eraseObjectPixels(mainCtx, extractedObject.pixelOffsets);
+        const sel: ActiveSelection = {
+          ownerFrameId: frames[currentFrame].id,
+          canvas: extractedObject.canvas,
+          x: extractedObject.x,
+          y: extractedObject.y,
+          width: extractedObject.width,
+          height: extractedObject.height,
+          initialX: extractedObject.x,
+          initialY: extractedObject.y,
+          initialWidth: extractedObject.width,
+          initialHeight: extractedObject.height,
+          originalBitmap,
+          hasChanged: false,
+        };
+        setActiveSelection(sel);
         isMovingSelectionRef.current = true;
         startPosRef.current = { x, y };
         initialSelectionPosRef.current = {
           x: extractedObject.x,
           y: extractedObject.y,
         };
-
-        saveCanvasSnapshot(mainCanvas);
         playPop();
       } else {
         isBoxSelectingRef.current = true;
@@ -582,10 +785,24 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
           return;
         }
 
-        finalizeSticker();
+        commitPendingChanges();
         return;
       } else {
-        setActiveSticker({ ownerFrameId: frames[currentFrame].id, emoji: selectedSticker, x, y, size: 100 });
+        const newSticker: ActiveSticker = {
+          id: createId(),
+          ownerFrameId: frames[currentFrame].id,
+          emoji: selectedSticker,
+          x,
+          y,
+          size: 100,
+          initialX: x,
+          initialY: y,
+          initialSize: 100,
+          initialEmoji: selectedSticker,
+          isNew: true,
+        };
+        setActiveSticker(newSticker);
+        commitStickerChange(newSticker);
         playPop();
         return;
       }
@@ -601,7 +818,6 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
             const halfWidth = metrics.width / 2;
             const halfHeight = activeText.size / 2;
 
-            // Даем небольшой запас, чтобы текст было проще схватить пальцем.
             if (
               Math.abs(x - activeText.x) < halfWidth + 20 &&
               Math.abs(y - activeText.y) < halfHeight + 20
@@ -612,16 +828,17 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
               return;
             }
           }
-          finalizeText();
+          commitPendingChanges();
           return;
         }
 
         if (activeText.isEditing) {
-          finalizeText();
+          commitPendingChanges();
           return;
         }
       } else {
         setActiveText({
+          id: createId(),
           ownerFrameId: frames[currentFrame].id,
           text: "",
           x,
@@ -630,6 +847,7 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
           font: selectedFont,
           color,
           isEditing: true,
+          isNew: true,
         });
         setTextInput("");
         setTimeout(() => textInputRef.current?.focus(), 10);
@@ -638,11 +856,15 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
     }
 
     if (tool === "fill") {
+      const pixel = mainCtx.getImageData(Math.floor(x), Math.floor(y), 1, 1).data;
+      const targetHex = rgbToHex(pixel[0], pixel[1], pixel[2]);
+      if (pixel[3] > 0 && targetHex.toLowerCase() === color.toLowerCase()) {
+        return;
+      }
       playAction();
       floodFill(mainCtx, Math.floor(x), Math.floor(y), color);
       saveCanvasSnapshot(mainCanvas);
       checkCanvasContent(mainCanvas);
-
       return;
     }
 
@@ -733,6 +955,7 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
                 ...selection,
                 x: initialSelectionPosRef.current.x + dx,
                 y: initialSelectionPosRef.current.y + dy,
+                hasChanged: true,
               }
             : selection,
         );
@@ -861,7 +1084,7 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
           mainCanvas &&
           mainCtx
         ) {
-          const extractedObject = extractObjectInRect(
+          const extractedObject = findObjectInRect(
             mainCtx,
             selectionStart.x,
             selectionStart.y,
@@ -869,8 +1092,22 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
             y,
           );
           if (extractedObject) {
-            setActiveSelection(extractedObject);
-            saveCanvasSnapshot(mainCanvas);
+            const originalBitmap = frames[currentFrame].bitmap;
+            eraseObjectPixels(mainCtx, extractedObject.pixelOffsets);
+            setActiveSelection({
+              ownerFrameId: frames[currentFrame].id,
+              canvas: extractedObject.canvas,
+              x: extractedObject.x,
+              y: extractedObject.y,
+              width: extractedObject.width,
+              height: extractedObject.height,
+              initialX: extractedObject.x,
+              initialY: extractedObject.y,
+              initialWidth: extractedObject.width,
+              initialHeight: extractedObject.height,
+              originalBitmap,
+              hasChanged: false,
+            });
             playPop();
           }
         }
@@ -879,22 +1116,38 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
 
       if (isMovingSelectionRef.current) {
         isMovingSelectionRef.current = false;
+        if (activeSelection && (activeSelection.x !== activeSelection.initialX || activeSelection.y !== activeSelection.initialY)) {
+          commitSelectionChange(activeSelection);
+        }
         return;
       }
       if (isMovingTextRef.current) {
         isMovingTextRef.current = false;
+        if (activeText && hasTextChanged(activeText)) {
+          commitTextChange(activeText);
+        }
         return;
       }
     }
 
     if (tool === "text") {
-      isMovingTextRef.current = false;
+      if (isMovingTextRef.current) {
+        isMovingTextRef.current = false;
+        if (activeText && hasTextChanged(activeText)) {
+          commitTextChange(activeText);
+        }
+      }
       return;
     }
 
     if (tool === "sticker") {
-      isMovingStickerRef.current = false;
-      isResizingStickerRef.current = false;
+      if (isMovingStickerRef.current || isResizingStickerRef.current) {
+        isMovingStickerRef.current = false;
+        isResizingStickerRef.current = false;
+        if (activeSticker && hasStickerChanged(activeSticker)) {
+          commitStickerChange(activeSticker);
+        }
+      }
       return;
     }
 
@@ -950,17 +1203,27 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
 
     saveCanvasSnapshot(mainCanvas);
     checkCanvasContent(mainCanvas);
-
-
   };
 
   const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const wasBoxSelecting = isBoxSelectingRef.current;
+    const wasEraser = tool === "eraser" && isDrawingRef.current;
     isBoxSelectingRef.current = false;
     isMovingSelectionRef.current = false;
     isMovingTextRef.current = false;
+    isMovingStickerRef.current = false;
+    isResizingStickerRef.current = false;
     isDrawingRef.current = false;
     if (wasBoxSelecting || tool !== "select") clearOverlayCanvas();
+
+    if (wasEraser && baseCanvasRef.current && mainCanvasRef.current) {
+      const mainCtx = mainCanvasRef.current.getContext("2d");
+      if (mainCtx) {
+        mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        mainCtx.drawImage(baseCanvasRef.current, 0, 0);
+        drawObjects(mainCtx, frames[currentFrame].objects);
+      }
+    }
 
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
@@ -1064,7 +1327,7 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
 
   const addFrame = () => {
     playPop();
-    const newFrames = [...finalizePending()];
+    const newFrames = [...commitPendingChanges()];
     newFrames.splice(currentFrame + 1, 0, createFrame(getBlankCanvas()));
     saveState(newFrames);
     setCurrentFrame(currentFrame + 1);
@@ -1072,7 +1335,7 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
 
   const copyFrame = () => {
     playPop();
-    const newFrames = [...finalizePending()];
+    const newFrames = [...commitPendingChanges()];
     newFrames.splice(currentFrame + 1, 0, cloneFrame(newFrames[currentFrame]));
     saveState(newFrames);
     setCurrentFrame(currentFrame + 1);
@@ -1084,22 +1347,24 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
       return;
     }
     playSwoosh();
-    const newFrames = [...frames];
-    saveState(removeFrame(newFrames, frames[currentFrame].id));
+    cancelPendingChanges();
+    const newFrames = removeFrame(frames, frames[currentFrame].id);
+    saveState(newFrames);
     setCurrentFrame(Math.min(currentFrame, newFrames.length - 1));
   };
 
   const clearCanvas = () => {
     playSwoosh();
+    cancelPendingChanges();
     const newFrames = [...frames];
     newFrames[currentFrame] = { ...frames[currentFrame], bitmap: getBlankCanvas(), preview: getBlankCanvas(), objects: [] };
     saveState(newFrames);
-    setActiveText(null); setActiveSticker(null); setActiveSelection(null); clearOverlayCanvas();
   };
 
   const savePng = () => {
     playAction();
-    downloadPng(finalizePending()[currentFrame].preview);
+    const committed = commitPendingChanges();
+    downloadPng(committed[currentFrame].preview);
   };
 
   const saveGif = async () => {
@@ -1110,7 +1375,8 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
     playAction();
     setIsExporting(true);
     try {
-      await downloadGif(finalizePending().map(frame => frame.preview), fps, CANVAS_WIDTH, CANVAS_HEIGHT);
+      const committed = commitPendingChanges();
+      await downloadGif(committed.map(frame => frame.preview), fps, CANVAS_WIDTH, CANVAS_HEIGHT);
     } catch (e) {
       console.error(e);
       alert("Ошибка при сохранении GIF");
@@ -1122,6 +1388,7 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
     const file = e.target.files?.[0];
     if (!file) return;
 
+    cancelPendingChanges();
     const target = frames[currentFrame];
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -1135,7 +1402,6 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         const bitmap = canvas.toDataURL("image/png");
         saveState(previous => previous.map(frame => frame.id === target.id ? { ...frame, bitmap, preview: bitmap, objects: [] } : frame));
-        if (frames[currentFrame].id === target.id) clearPending();
         playPop();
       };
       img.onerror = () => setCanvasError("Не удалось открыть изображение");
@@ -1198,8 +1464,8 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
         isPlaying={isPlaying}
         isExporting={isExporting}
         fileInputRef={fileInputRef}
-        onUndo={() => { playPop(); changeHistory(Math.max(0, historyIndex - 1)); }}
-        onRedo={() => { playPop(); changeHistory(Math.min(history.length - 1, historyIndex + 1)); }}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
         onImageUpload={handleImageUpload}
         onClear={clearCanvas}
         onSavePng={savePng}
@@ -1262,8 +1528,8 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
             if (activeText) setActiveText({ ...activeText, color: nextColor });
           }}
           onOpenStickers={() => setShowStickerPanel(true)}
-          onFinalizeSticker={finalizeSticker}
-          onCancelSticker={cancelSticker}
+          onFinalizeSticker={commitPendingChanges}
+          onCancelSticker={cancelPendingChanges}
         />
 
         <DrawingStage
@@ -1286,7 +1552,7 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
             setTextInput(value);
             setActiveText((current) => current ? { ...current, text: value } : current);
           }}
-          onFinalizeText={finalizeText}
+          onFinalizeText={commitPendingChanges}
         />
       </div>
 
@@ -1296,12 +1562,12 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
         draggedFrameIndex={draggedFrameIdx}
         isPlaying={isPlaying}
         fps={fps}
-        onTogglePlayback={() => { playAction(); finalizePending(); clearPending(); setIsPlaying(!isPlaying); }}
+        onTogglePlayback={() => { playAction(); commitPendingChanges(); setIsPlaying(!isPlaying); }}
         onFpsChange={(nextFps) => { playPop(); setFps(nextFps); }}
         onAddFrame={addFrame}
         onCopyFrame={copyFrame}
         onDeleteFrame={deleteFrame}
-        onSelectFrame={(index) => { playPop(); finalizePending(); setCurrentFrame(index); }}
+        onSelectFrame={(index) => { playPop(); commitPendingChanges(); setCurrentFrame(index); }}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
@@ -1347,13 +1613,31 @@ function Editor({ initialState, persistenceEnabled, loadError }: { initialState:
       <SelectionContextMenu
         menu={contextMenu}
         onDelete={(target) => {
-          if (target === "selection") setActiveSelection(null);
-          else if (target === "sticker") {
-            if (activeSticker?.id) commitObjects(frames[currentFrame].objects.filter(object => object.id !== activeSticker.id), frames[currentFrame].id);
-            cancelSticker();
+          if (target === "selection") {
+            if (activeSelection) {
+              const mainCanvas = mainCanvasRef.current;
+              if (mainCanvas) {
+                const bitmap = mainCanvas.toDataURL("image/png");
+                const owner = activeSelection.ownerFrameId ?? frames[currentFrame].id;
+                saveState(prev => prev.map(f => f.id === owner ? { ...f, bitmap, preview: bitmap } : f));
+              }
+              setActiveSelection(null);
+            }
+          } else if (target === "sticker") {
+            if (activeSticker?.id) {
+              const owner = activeSticker.ownerFrameId ?? frames[currentFrame].id;
+              const f = frames.find(frame => frame.id === owner);
+              if (f) commitObjects(f.objects.filter(object => object.id !== activeSticker.id), owner);
+            }
+            setActiveSticker(null);
           } else {
-            if (activeText?.id) commitObjects(frames[currentFrame].objects.filter(object => object.id !== activeText.id), frames[currentFrame].id);
-            setActiveText(null); setTextInput("");
+            if (activeText?.id) {
+              const owner = activeText.ownerFrameId ?? frames[currentFrame].id;
+              const f = frames.find(frame => frame.id === owner);
+              if (f) commitObjects(f.objects.filter(object => object.id !== activeText.id), owner);
+            }
+            setActiveText(null);
+            setTextInput("");
           }
           setContextMenu(null);
           playSwoosh();

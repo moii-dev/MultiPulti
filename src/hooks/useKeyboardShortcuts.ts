@@ -22,15 +22,15 @@ export function useKeyboardShortcuts(shortcuts: KeyboardShortcuts) {
       const key = event.key.toLowerCase();
       const current = shortcutsRef.current;
 
-      if (key === "z" && event.shiftKey && current.canRedo) {
+      const isRedo = (key === "z" && event.shiftKey) || (key === "y" && !event.shiftKey);
+      const isUndo = key === "z" && !event.shiftKey;
+
+      if (isRedo) {
         event.preventDefault();
-        current.onRedo();
-      } else if (key === "y" && current.canRedo) {
+        if (current.canRedo) current.onRedo();
+      } else if (isUndo) {
         event.preventDefault();
-        current.onRedo();
-      } else if (key === "z" && current.canUndo) {
-        event.preventDefault();
-        current.onUndo();
+        if (current.canUndo) current.onUndo();
       }
     };
 
