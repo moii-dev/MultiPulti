@@ -1,10 +1,11 @@
+import type { Frame } from "../types/editor";
 import type { DragEvent } from "react";
 import { Copy, Play, Plus, Square as StopCircle, Trash } from "lucide-react";
 import { FPS_OPTIONS } from "../constants/editor";
 import { cn } from "../utils/cn";
 
 interface TimelineProps {
-  frames: string[];
+  frames: Frame[];
   currentFrame: number;
   draggedFrameIndex: number | null;
   isPlaying: boolean;
@@ -46,7 +47,7 @@ export function Timeline(props: TimelineProps) {
       <div className="flex-1 flex items-center gap-3 overflow-x-auto pb-2 px-2 snap-x">
         {props.frames.map((frame, index) => (
           <div
-            key={index}
+            key={frame.id}
             draggable={!props.isPlaying}
             onDragStart={(event) => props.onDragStart(event, index)}
             onDragOver={props.onDragOver}
@@ -55,7 +56,7 @@ export function Timeline(props: TimelineProps) {
             className={cn("relative h-full aspect-[4/3] bg-white border-4 rounded-xl shrink-0 cursor-pointer snap-center transition-all overflow-hidden", props.currentFrame === index ? "border-blue-500 scale-105 shadow-[0_0_0_4px_rgba(59,130,246,0.3)]" : "border-gray-300 hover:border-gray-400", props.draggedFrameIndex === index && "opacity-50 scale-95")}
             onClick={() => { if (!props.isPlaying) props.onSelectFrame(index); }}
           >
-            <img src={frame} alt={`Кадр ${index + 1}`} className="w-full h-full object-contain bg-white" />
+            <img src={frame.preview} alt={`Кадр ${index + 1}`} className="w-full h-full object-contain bg-white" />
             <div className="absolute bottom-1 right-1 bg-black text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md">{index + 1}</div>
           </div>
         ))}

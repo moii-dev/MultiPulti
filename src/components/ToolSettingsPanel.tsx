@@ -1,6 +1,6 @@
-import { BookTemplate, Check, FlipHorizontal, Palette, Smile, Type, Wand2, X } from "lucide-react";
+import { BookTemplate, Check, FlipHorizontal, Palette, Smile, Wand2, X } from "lucide-react";
 import { AVAILABLE_FONTS, BASIC_COLORS, BRUSH_SIZES, SHAPES, TOOLS, type FontName } from "../constants/editor";
-import type { ActiveSelection, ActiveSticker, ActiveText, PlacedText, ShapeId, ToolId } from "../types/editor";
+import type { ActiveSelection, ActiveSticker, ActiveText, ShapeId, ToolId } from "../types/editor";
 import { cn } from "../utils/cn";
 
 interface ToolSettingsPanelProps {
@@ -8,7 +8,6 @@ interface ToolSettingsPanelProps {
   activeSelection: ActiveSelection | null;
   activeText: ActiveText | null;
   activeSticker: ActiveSticker | null;
-  placedTexts: PlacedText[];
   customHue: number;
   color: string;
   selectedShape: ShapeId;
@@ -23,7 +22,6 @@ interface ToolSettingsPanelProps {
   onFlipSelection: () => void;
   onSelectionHueChange: (hue: number) => void;
   onSelectionColorChange: (color: string) => void;
-  onConvertSelectionToText: (text: PlacedText) => void;
   onShapeChange: (shape: ShapeId) => void;
   onBrushSizeChange: (size: number) => void;
   onTextChange: (text: string) => void;
@@ -38,17 +36,7 @@ interface ToolSettingsPanelProps {
   onCancelSticker: () => void;
 }
 
-function findSelectedText(selection: ActiveSelection | null, texts: PlacedText[]) {
-  if (!selection) return null;
-  return texts.find((text) => {
-    const overlapX = Math.max(0, Math.min(text.x + text.w / 2, selection.x + selection.width) - Math.max(text.x - text.w / 2, selection.x));
-    const overlapY = Math.max(0, Math.min(text.y + text.h / 2, selection.y + selection.height) - Math.max(text.y - text.h / 2, selection.y));
-    return text.w * text.h > 0 && (overlapX * overlapY) / (text.w * text.h) >= 0.3;
-  }) ?? null;
-}
-
 export function ToolSettingsPanel(props: ToolSettingsPanelProps) {
-  const matchedText = findSelectedText(props.activeSelection, props.placedTexts);
   return (
     <aside className="w-48 sm:w-60 bg-blue-50/50 flex flex-col pt-0 pb-6 overflow-y-auto no-scrollbar shrink-0 z-20 transition-all duration-300">
       <div className="bg-white py-4 px-4 border-b-4 border-black mb-4 sticky top-0 z-10 shadow-sm flex items-center justify-center">
@@ -64,7 +52,6 @@ export function ToolSettingsPanel(props: ToolSettingsPanelProps) {
                 <div className="flex flex-col gap-3"><SettingsLabel>Размер</SettingsLabel><div className="flex justify-center gap-4"><button className="btn-kid p-3 text-2xl font-black w-14 h-14" onClick={() => props.onScaleSelection(0.9)} title="Уменьшить">-</button><button className="btn-kid p-3 text-2xl font-black w-14 h-14" onClick={() => props.onScaleSelection(1.1)} title="Увеличить">+</button></div></div>
                 <div className="flex flex-col gap-3"><SettingsLabel>Отразить</SettingsLabel><div className="flex justify-center gap-4"><button className="btn-kid p-3 flex items-center justify-center text-blue-600 w-14 h-14" onClick={props.onFlipSelection} title="По горизонтали"><FlipHorizontal className="w-8 h-8" /></button></div></div>
                 <div className="flex flex-col gap-3 items-center"><SettingsLabel>Перекрасить (Свой цвет)</SettingsLabel><div className="w-full px-2 mb-2"><input type="range" min="0" max="360" value={props.customHue} onChange={(event) => props.onSelectionHueChange(Number(event.target.value))} className="color-slider w-full h-8 rounded-full border-4 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] outline-none" style={{ background: "linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%)" }} /></div><div className="grid grid-cols-4 gap-2 w-full px-2">{BASIC_COLORS.map((item) => <button key={item.hex} className="w-full aspect-square rounded-full border-4 border-black hover:-translate-y-1 transition-transform" style={{ backgroundColor: item.hex }} onClick={() => props.onSelectionColorChange(item.hex)} />)}</div></div>
-                {matchedText && <div className="flex flex-col gap-3 px-2"><button className="btn-kid bg-yellow-400 text-black py-4 px-4 flex items-center justify-center gap-2" onClick={() => props.onConvertSelectionToText(matchedText)}><Type className="w-6 h-6" /> Изменить текст</button></div>}
               </>
             ) : null}
           </div>

@@ -9,8 +9,10 @@ export type SmartShape =
   | { type: "ellipse"; cx: number; cy: number; rx: number; ry: number }
   | { type: "line"; x1: number; y1: number; x2: number; y2: number };
 
-export interface PlacedText {
-  id: number;
+export interface TextObject {
+  kind: "text";
+  id: string;
+  size: number;
   x: number;
   y: number;
   w: number;
@@ -21,7 +23,36 @@ export interface PlacedText {
 }
 
 export interface FrameHistoryEntry {
-  frames: string[];
+  frames: Frame[];
+}
+
+export interface StickerObject {
+  kind: "sticker";
+  id: string;
+  emoji: string;
+  x: number;
+  y: number;
+  size: number;
+}
+
+/** Raster overlays retain paint order without converting brush strokes to vectors. */
+export interface RasterLayer {
+  kind: "raster";
+  id: string;
+  bitmap: string;
+}
+export type CanvasObject = TextObject | StickerObject | RasterLayer;
+export interface Frame {
+  id: string;
+  bitmap: string;
+  objects: CanvasObject[];
+  /** Derived composite for timeline and export. */
+  preview: string;
+}
+export interface Project {
+  version: 2;
+  frames: Frame[];
+  currentFrameId: string;
 }
 
 export interface StoredAppState {
@@ -41,6 +72,8 @@ export interface ActiveSelection {
 }
 
 export interface ActiveSticker {
+  id?: string;
+  ownerFrameId?: string;
   emoji: string;
   x: number;
   y: number;
@@ -48,6 +81,8 @@ export interface ActiveSticker {
 }
 
 export interface ActiveText {
+  id?: string;
+  ownerFrameId?: string;
   text: string;
   x: number;
   y: number;
