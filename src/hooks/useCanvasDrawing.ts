@@ -530,17 +530,15 @@ export function useCanvasDrawing(props: UseCanvasDrawingProps) {
       mainCtx.lineJoin = "round";
       mainCtx.lineWidth = brushSize;
       mainCtx.strokeStyle = "#FFFFFF";
-
+      mainCtx.fillStyle = '#FFFFFF';
       mainCtx.beginPath();
-      mainCtx.moveTo(x, y);
-      mainCtx.lineTo(x, y);
-      mainCtx.stroke();
+      mainCtx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+      mainCtx.fill();
 
       if (symmetryMode) {
         mainCtx.beginPath();
-        mainCtx.moveTo(CANVAS_WIDTH - x, y);
-        mainCtx.lineTo(CANVAS_WIDTH - x, y);
-        mainCtx.stroke();
+        mainCtx.arc(CANVAS_WIDTH - x, y, brushSize / 2, 0, Math.PI * 2);
+        mainCtx.fill();
       }
       return;
     }

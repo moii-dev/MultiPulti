@@ -68,7 +68,7 @@ test('real browser release audit (isolated storage)', { timeout: 180000 }, async
       await page.getByRole('button', { name: 'Выбрать кадр 2', exact: true }).waitFor();
       await page.waitForFunction(() => !document.querySelector('[aria-label="Копировать текущий кадр"]').disabled);
       await page.waitForTimeout(80);
-      await stroke();
+      await stroke(.2,.7,.7,.7);
       await page.waitForFunction(async () => {
         const p = await (await import('/src/services/projectRepository.ts')).projectRepository.loadProject();
         return p.frames.length === 2 && p.frames[1].bitmap !== p.frames[0].bitmap;
@@ -180,6 +180,18 @@ test('real browser release audit (isolated storage)', { timeout: 180000 }, async
       assert.deepEqual(await page.locator('canvas').first().evaluate(c => [...c.getContext('2d').getImageData(400,300,1,1).data]), [255,0,0,255]);
       await page.locator('input[type=file]').setInputFiles({ name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('broken') });
       await page.getByRole('alert').filter({ hasText: 'Не удалось открыть файл изображения' }).waitFor();
+      const beforeRejected = (await data()).frames;
+      await page.locator('input[type=file]').setInputFiles({ name: 'large.png', mimeType: 'image/png', buffer: Buffer.alloc(15 * 1024 * 1024 + 1) });
+      await page.getByRole('alert').filter({ hasText: 'Файл слишком большой' }).waitFor();
+      const dimensions = await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 8193; c.height = 1; return c.toDataURL().split(',')[1]; });
+      await page.locator('input[type=file]').setInputFiles({ name: 'wide.png', mimeType: 'image/png', buffer: Buffer.from(dimensions, 'base64') });
+      await page.getByRole('alert').filter({ hasText: 'Разрешение изображения слишком велико' }).waitFor();
+      assert.deepEqual((await data()).frames, beforeRejected);
+      const largeImage = await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 4096; c.height = 2048; const ctx = c.getContext('2d'); ctx.fillStyle = 'blue'; ctx.fillRect(0,0,c.width,c.height); return c.toDataURL().split(',')[1]; });
+      await page.locator('input[type=file]').setInputFiles({ name: 'photo-size.png', mimeType: 'image/png', buffer: Buffer.from(largeImage,'base64') });
+      await home(); await button('Открыть мультик «А»').click(); await page.locator('canvas').first().waitFor();
+      await page.waitForFunction(() => document.querySelector('canvas').getContext('2d').getImageData(400,300,1,1).data[2] === 255);
+      assert.deepEqual(await page.locator('canvas').first().evaluate(c => [...c.getContext('2d').getImageData(400,300,1,1).data]), [0,0,255,255]);
       await page.evaluate(() => { window.auditPut = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function () { throw new DOMException('quota', 'QuotaExceededError'); }; });
       await stroke(.1, .8, .8, .8); const edited = await snapshot();
       await button('Вернуться ко всем мультикам').click();

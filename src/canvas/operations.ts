@@ -101,6 +101,12 @@ export function drawSmoothedCurve(ctx: CanvasRenderingContext2D, points: Point[]
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     const getX = (point: Point) => (mirror ? CANVAS_WIDTH - point.x : point.x);
+    if (points.length === 1) {
+      ctx.fillStyle = color;
+      ctx.arc(getX(points[0]), points[0].y, size / 2, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
     ctx.moveTo(getX(points[0]), points[0].y);
     if (points.length < 3) {
       for (let index = 1; index < points.length; index++) ctx.lineTo(getX(points[index]), points[index].y);

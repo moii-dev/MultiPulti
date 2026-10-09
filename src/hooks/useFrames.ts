@@ -142,7 +142,7 @@ export function useFrames({
           setCanvasError("Canvas недоступен");
           return;
         }
-        baseCtx.drawImage(img, 0, 0);
+        baseCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
         void render(base);
       };
       img.onerror = () => {
