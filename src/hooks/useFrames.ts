@@ -68,6 +68,13 @@ export function useFrames({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const baseBitmapRef = useRef<string | null>(null);
   const uploadRequestIdRef = useRef(0);
+  const pendingImport = useRef<Promise<void>>(Promise.resolve());
+  const cancelImport = useRef<() => void>(() => {});
+  useEffect(() => () => {
+    uploadRequestIdRef.current++;
+    cancelImport.current();
+    pruneRasterCache([]);
+  }, []);
   const isPlayingRef = useRef(isPlaying);
   isPlayingRef.current = isPlaying;
 
@@ -252,7 +259,8 @@ export function useFrames({
     const committed = commitPendingChanges();
     const target = committed[currentFrame] ?? committed[0];
     if (target?.preview) {
-      downloadPng(target.preview);
+      try { downloadPng(target.preview); }
+      catch { setCanvasError('Не удалось экспортировать рисунок в PNG. Попробуй ещё раз.'); }
     }
   }, [commitPendingChanges, currentFrame]);
 
@@ -292,7 +300,7 @@ export function useFrames({
       }
       if (!file) return;
 
-      if (!file.type.startsWith("image/")) {
+      if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) {
         setCanvasError("Пожалуйста, выбери файл изображения (PNG, JPEG, WebP, GIF)");
         playError();
         return;
@@ -305,16 +313,20 @@ export function useFrames({
         return;
       }
 
-      cancelPendingChanges();
-      const target = frames[currentFrame];
+      const target = commitPendingChanges()[currentFrame];
       if (!target) return;
 
       const requestId = ++uploadRequestIdRef.current;
+      cancelImport.current();
       const objectUrl = URL.createObjectURL(file);
       const img = new Image();
+      let complete!: () => void;
+      pendingImport.current = new Promise<void>(resolve => { complete = resolve; });
+      const finish = () => { URL.revokeObjectURL(objectUrl); complete(); };
+      cancelImport.current = () => { img.onload = null; img.onerror = null; img.src = ''; finish(); };
 
       img.onload = () => {
-        URL.revokeObjectURL(objectUrl);
+        finish();
         if (requestId !== uploadRequestIdRef.current) return;
 
         if (img.naturalWidth <= 0 || img.naturalHeight <= 0) {
@@ -347,8 +359,11 @@ export function useFrames({
         ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
 
         const currentFrames = getFrames();
-        const targetExists = currentFrames.some((frame) => frame.id === target.id);
-        if (!targetExists) return;
+        const latestTarget = currentFrames.find((frame) => frame.id === target.id);
+        if (latestTarget !== target) {
+          setCanvasError('Кадр изменился во время импорта. Выбери изображение ещё раз.');
+          return;
+        }
 
         const bitmap = canvas.toDataURL("image/png");
         saveState((previous) =>
@@ -363,7 +378,7 @@ export function useFrames({
       };
 
       img.onerror = () => {
-        URL.revokeObjectURL(objectUrl);
+        finish();
         if (requestId === uploadRequestIdRef.current) {
           setCanvasError("Не удалось открыть файл изображения");
           playError();
@@ -372,7 +387,7 @@ export function useFrames({
 
       img.src = objectUrl;
     },
-    [cancelPendingChanges, currentFrame, frames, getFrames, saveState],
+    [commitPendingChanges, currentFrame, getFrames, saveState],
   );
 
   const handleDragStart = useCallback(
@@ -421,6 +436,7 @@ export function useFrames({
     savePng,
     saveGif,
     handleImageUpload,
+    waitForImport: () => pendingImport.current,
     handleDragStart,
     handleDragOver,
     handleDrop,

@@ -7,9 +7,9 @@ import { LOGO_URL } from "../constants/editor";
 import { playPop, playAction, playSwoosh } from "../utils/audio";
 import type { ProjectSummary } from "../types/editor";
 
-interface HomeScreenProps { onOpenProject: (id: string) => void; }
+interface HomeScreenProps { onOpenProject: (id: string) => void; startupError?: string | null; onRetryStartup?: () => Promise<void>; }
 
-export function HomeScreen({ onOpenProject }: HomeScreenProps) {
+export function HomeScreen({ onOpenProject, startupError, onRetryStartup }: HomeScreenProps) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -92,6 +92,7 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
         </div>
       </header>
       <main className="home-content" aria-busy={loading}>
+        {startupError && <div role="alert" className="home-error bg-red-100 border-4 border-black rounded-2xl p-4 mb-6"><p className="font-bold text-red-900">{startupError}</p><button className="btn-kid px-4 py-2" onClick={async () => { await onRetryStartup?.(); await loadProjects(); }}>Повторить перенос</button></div>}
         <div className="home-section-heading">
           <h2 tabIndex={-1} data-home-focus className="text-2xl sm:text-3xl font-black text-black flex items-center gap-2">
             <Sparkles aria-hidden="true" className="w-6 h-6 text-amber-600 shrink-0" />

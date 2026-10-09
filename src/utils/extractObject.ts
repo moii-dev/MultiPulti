@@ -227,7 +227,8 @@ export function findObjectInRect(
  */
 export function eraseObjectPixels(
   ctx: CanvasRenderingContext2D,
-  pixelOffsets: number[]
+  pixelOffsets: number[],
+  transparent = false,
 ): void {
   if (pixelOffsets.length === 0) return;
   const width = ctx.canvas.width;
@@ -240,7 +241,7 @@ export function eraseObjectPixels(
     data[sourceIndex] = 255;
     data[sourceIndex + 1] = 255;
     data[sourceIndex + 2] = 255;
-    data[sourceIndex + 3] = 255;
+    data[sourceIndex + 3] = transparent ? 0 : 255;
   }
 
   ctx.putImageData(imageData, 0, 0);

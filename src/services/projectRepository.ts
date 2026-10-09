@@ -1,4 +1,4 @@
-import { cloneProject, createNewProject, migrateLegacy, validateProject, validateProjectTitle } from '../domain/project';
+import { cloneProject, createNewProject, isBitmap, migrateLegacy, validateProject, validateProjectTitle } from '../domain/project';
 import type { Project, ProjectSummary } from '../types/editor';
 export const LEGACY_KEY = 'multipulti_state';
 const PREFERENCES_KEY = 'multipulti_preferences';
@@ -45,7 +45,7 @@ export function createProjectRepository(factory: () => IDBFactory = () => indexe
       request.onblocked = () => { blocked = true; reject(new Error('IndexedDB заблокирован другой вкладкой')); };
     });
   }
-  async function transaction(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest): Promise<unknown> {
+  async function transaction(mode: IDBTransactionMode, action: (store: IDBObjectStore, fail: (error: unknown) => void) => IDBRequest): Promise<unknown> {
     const db = await database();
     try {
       return await new Promise((resolve, reject) => {
@@ -53,8 +53,13 @@ export function createProjectRepository(factory: () => IDBFactory = () => indexe
         let result: unknown;
         tx.oncomplete = () => resolve(result);
         tx.onabort = tx.onerror = () => reject(tx.error || new Error('Ошибка хранилища проекта'));
-        const request = action(tx.objectStore('projects'));
-        request.onsuccess = () => { result = request.result; };
+        const fail = (error: unknown) => { reject(error); tx.abort(); };
+        try {
+          const request = action(tx.objectStore('projects'), fail);
+          request.addEventListener('success', () => { result = request.result; });
+        } catch (error) {
+          fail(error);
+        }
       });
     } finally { db.close(); }
   }
@@ -65,7 +70,7 @@ export function createProjectRepository(factory: () => IDBFactory = () => indexe
         const tx = db.transaction('projects', 'readonly');
         const store = tx.objectStore('projects');
         const request = store.openCursor();
-        const projectsMap = new Map<string, Project>();
+        const projectsMap = new Map<string, unknown>();
         let currentProject: Project | null = null;
 
         request.onsuccess = () => {
@@ -73,17 +78,12 @@ export function createProjectRepository(factory: () => IDBFactory = () => indexe
           if (cursor) {
             const key = String(cursor.key);
             const value = cursor.value;
-            if (record(value) && value.version === 2) {
-              if (key === 'current') {
-                currentProject = value as unknown as Project;
-              } else {
-                projectsMap.set(key, value as unknown as Project);
-              }
-            }
+            if (key === 'current') currentProject = value as Project;
+            else projectsMap.set(key, value);
             cursor.continue();
           } else {
             if (currentProject) {
-              const currentId = currentProject.id || 'current';
+              const currentId = typeof currentProject.id === 'string' && currentProject.id ? currentProject.id : 'current';
               if (!projectsMap.has(currentId)) {
                 projectsMap.set(currentId, {
                   ...currentProject,
@@ -95,13 +95,18 @@ export function createProjectRepository(factory: () => IDBFactory = () => indexe
               }
             }
 
-            const summaries: ProjectSummary[] = Array.from(projectsMap.values()).map(p => {
-              const id = p.id || 'current';
-              const title = p.title || 'Новый мультик';
-              const frameCount = Array.isArray(p.frames) ? p.frames.length : 1;
-              const preview = p.frames?.[0]?.preview || p.frames?.[0]?.bitmap || '';
-              const createdAt = typeof p.createdAt === 'number' ? p.createdAt : Date.now();
-              const updatedAt = typeof p.updatedAt === 'number' ? p.updatedAt : createdAt;
+            const date = (v: unknown): number => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= 8.64e15 ? v : 0;
+            const summaries: ProjectSummary[] = Array.from(projectsMap.entries()).map(([id, value]) => {
+              const p = record(value) ? value : {};
+              const title = typeof p.title === 'string' && p.title.trim() ? p.title : 'Мой мультик';
+              let damaged = false;
+              try { validateProject(value); if (id !== 'current' && p.id && p.id !== id) damaged = true; }
+              catch { damaged = true; }
+              const frameCount = Array.isArray(p.frames) ? p.frames.length : 0;
+              const first = Array.isArray(p.frames) && record(p.frames[0]) ? p.frames[0] : {};
+              const preview = isBitmap(first.preview) ? first.preview : '';
+              const createdAt = date(p.createdAt);
+              const updatedAt = date(p.updatedAt) || createdAt;
               return {
                 id,
                 title,
@@ -110,6 +115,7 @@ export function createProjectRepository(factory: () => IDBFactory = () => indexe
                 preview,
                 createdAt,
                 updatedAt,
+                damaged,
               };
             });
 
@@ -117,7 +123,7 @@ export function createProjectRepository(factory: () => IDBFactory = () => indexe
             resolve(summaries);
           }
         };
-        request.onerror = tx.onerror = () => reject(tx.error || new Error('Ошибка чтения проектов'));
+        request.onerror = tx.onerror = tx.onabort = () => reject(tx.error || new Error('Ошибка чтения проектов'));
       });
     } finally {
       db.close();
@@ -127,7 +133,9 @@ export function createProjectRepository(factory: () => IDBFactory = () => indexe
     if (id && id !== 'current') {
       const value = await transaction('readonly', store => store.get(id));
       if (value === undefined) return null;
-      return verifyImages(validateProject(value));
+      if (record(value) && value.id && value.id !== id) throw new Error('Идентификатор проекта не совпадает с записью хранилища');
+      const project = validateProject(value);
+      return verifyImages({ ...project, id });
     }
     const currentVal = await transaction('readonly', store => store.get('current'));
     if (currentVal !== undefined) {
@@ -141,13 +149,32 @@ export function createProjectRepository(factory: () => IDBFactory = () => indexe
   }
   async function saveProject(project: Project) {
     validateProject(project);
-    await transaction('readwrite', store => {
-      if (project.id) {
-        store.put(project, project.id);
-        store.put(project, 'current');
-        return store.put(project, project.id);
+    if (project.id === 'current') throw new Error('Ключ current зарезервирован для совместимости');
+    // Freeze before opening the database; callers may keep editing meanwhile.
+    const snapshot = structuredClone(project);
+    await transaction('readwrite', (store, fail) => {
+      const previous = store.get('current');
+      previous.onsuccess = () => {
+        const old = previous.result;
+        if (!snapshot.id || old === undefined || (record(old) && old.id === snapshot.id)) return;
+        const oldId = record(old) && typeof old.id === 'string' && old.id && old.id !== 'current' ? old.id : 'legacy-current';
+        if (oldId === snapshot.id) return;
+        const named = store.get(oldId);
+        named.onsuccess = () => {
+          try {
+            // Preserve even an unreadable orphan before replacing the legacy slot.
+            if (named.result === undefined) store.put(record(old) ? { ...old, id: oldId } : old, oldId);
+            else if (!record(old) || !old.id) {
+              const backupId = crypto.randomUUID();
+              store.put(record(old) ? { ...old, id: backupId } : old, backupId);
+            }
+          } catch (error) { fail(error); }
+        };
+      };
+      if (snapshot.id) {
+        store.put(snapshot, snapshot.id);
       }
-      return store.put(project, 'current');
+      return store.put(snapshot, 'current');
     });
   }
   async function createProject(title?: string): Promise<Project> {
@@ -193,36 +220,66 @@ export function createProjectRepository(factory: () => IDBFactory = () => indexe
       return store.delete('current');
     });
   }
-  async function migrateLegacyProject(): Promise<Project | null> {
+  async function migrate(): Promise<Project | null> {
     const existing = await loadProject();
     if (existing) {
-      try {
-        const local = storage();
-        const raw = local.getItem(LEGACY_KEY);
+      // Promote the old single-project slot BEFORE any new project can replace it.
+      const current = await transaction('readonly', store => store.get('current'));
+      if (current !== undefined) {
+        const old = validateProject(current);
+        const id = old.id && old.id !== 'current' ? old.id : 'legacy-current';
+        const named = await transaction('readonly', store => store.get(id));
+        if (named === undefined) {
+          const promoted = { ...old, id, title: typeof old.title === 'string' ? old.title : 'Мой мультик', createdAt: old.createdAt ?? Date.now(), updatedAt: old.updatedAt ?? Date.now() };
+          await verifyImages(promoted);
+          await saveProject(promoted);
+          const verified = await loadProject(id);
+          if (JSON.stringify(verified) !== JSON.stringify(promoted)) throw new Error('Не удалось проверить перенос старого проекта');
+          return migrate();
+        }
+      }
+      const local = storage();
+      const raw = local.getItem(LEGACY_KEY);
         // A previous migration may have committed before localStorage cleanup failed.
         if (raw) {
-          const legacy = migrateLegacy(JSON.parse(raw));
+          let legacy: Project;
+          try { legacy = migrateLegacy(JSON.parse(raw)); }
+          catch { return existing; } // Keep the unreadable source; the home screen reports it.
           if (legacy.frames.length === existing.frames.length && legacy.frames.every((frame, index) => frame.bitmap === existing.frames[index].bitmap && existing.frames[index].objects.length === 0)) {
             const value = JSON.parse(raw);
             savePreferences({ ...readPreferences(local), recentColors: colors(value.recentColors), favoriteColors: colors(value.favoriteColors) }, local);
-            local.removeItem(LEGACY_KEY);
+            if (local.getItem(LEGACY_KEY) === raw) local.removeItem(LEGACY_KEY);
+          } else if (!await loadProject('legacy-local')) {
+            // A different old document must be imported alongside newer projects.
+            return migrateSource(raw);
           }
         }
-      } catch { /* IndexedDB is authoritative; leave an unreadable legacy source untouched. */ }
       return existing;
     }
     const local = storage();
     const raw = local.getItem(LEGACY_KEY);
     if (!raw) return null;
+    return migrateSource(raw);
+  }
+  async function migrateSource(raw: string): Promise<Project | null> {
+    const local = storage();
     const value = JSON.parse(raw);
-    const project = migrateLegacy(value);
+    const now = Date.now();
+    const project = { ...migrateLegacy(value), id: 'legacy-local', title: 'Мой мультик', createdAt: now, updatedAt: now };
     await verifyImages(project);
     await saveProject(project);
-    const verified = await loadProject();
+    const verified = await loadProject(project.id);
     if (JSON.stringify(verified) !== JSON.stringify(project)) throw new Error('Не удалось проверить миграцию');
     savePreferences({ ...readPreferences(local), recentColors: colors(value.recentColors), favoriteColors: colors(value.favoriteColors) }, local);
-    local.removeItem(LEGACY_KEY);
+    if (local.getItem(LEGACY_KEY) === raw) local.removeItem(LEGACY_KEY);
     return verified;
+  }
+  // StrictMode can invoke startup twice. Share only the in-flight migration;
+  // rejected migrations must remain retryable.
+  let migration: Promise<Project | null> | undefined;
+  function migrateLegacyProject() {
+    migration ??= migrate().finally(() => { migration = undefined; });
+    return migration;
   }
   return { loadProject, saveProject, deleteProject, migrateLegacyProject, listProjects, createProject, renameProject, duplicateProject };
 }

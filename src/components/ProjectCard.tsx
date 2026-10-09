@@ -66,7 +66,8 @@ export const ProjectCard = memo(function ProjectCard({ project, isMenuOpen, busy
       </div>
       <div className="project-details">
         <h3 className="text-lg font-black text-black line-clamp-2 break-words" title={project.title}>{project.title}</h3>
-        <p id={`project-updated-${project.id}`} className="text-xs font-bold text-gray-600 mt-1">Изменён {dateFormatter.format(project.updatedAt)}</p>
+        <p id={`project-updated-${project.id}`} className="text-xs font-bold text-gray-600 mt-1">{project.updatedAt ? `Изменён ${dateFormatter.format(project.updatedAt)}` : 'Дата неизвестна'}</p>
+        {project.damaged && <p className="text-sm font-bold text-red-700 mt-2">Не удалось прочитать данные</p>}
         {isCopying && <p className="text-sm font-bold mt-2">Создаём копию…</p>}
       </div>
     </button>

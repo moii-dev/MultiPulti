@@ -22,7 +22,7 @@ export function TemplatePicker({ isOpen, activeTemplate, onSelect, onClose }: Te
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-3xl p-6 w-full max-w-2xl border-4 sm:border-8 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] flex flex-col"
+        className="bg-white rounded-3xl p-6 w-full max-w-2xl max-h-[calc(100dvh-32px)] overflow-y-auto border-4 sm:border-8 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-6 shrink-0">

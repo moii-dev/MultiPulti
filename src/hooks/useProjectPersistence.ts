@@ -16,6 +16,7 @@ export function useProjectPersistence(
   history: FrameHistoryEntry[], historyIndex: number, currentFrame: number,
   favoriteColors: string[], recentColors: string[], fps: number,
   enabled: boolean, isPlaying: boolean, initial: Project,
+  commitPending?: () => Frame[], hasPending?: () => boolean,
 ) {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState('Сохранено');
@@ -47,12 +48,19 @@ export function useProjectPersistence(
   };
   const flushRef = useRef(flush);
   flushRef.current = flush;
+  const pendingRef = useRef({ commitPending, hasPending });
+  pendingRef.current = { commitPending, hasPending };
   useEffect(() => {
     mounted.current = true;
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (session.dirty(latest.current)) { event.preventDefault(); event.returnValue = ''; }
+      if (session.dirty(latest.current) || pendingRef.current.hasPending?.()) { event.preventDefault(); event.returnValue = ''; }
     };
-    const visibility = () => { if (document.visibilityState === 'hidden' && enabled) void flushRef.current().catch(() => {}); };
+    const visibility = () => {
+      if (document.visibilityState === 'hidden' && enabled) {
+        try { void flushRef.current(pendingRef.current.commitPending?.()).catch(() => {}); }
+        catch { setError('Не удалось подготовить изменения к сохранению. Они остаются в редакторе.'); }
+      }
+    };
     window.addEventListener('beforeunload', beforeUnload);
     document.addEventListener('visibilitychange', visibility);
     return () => {

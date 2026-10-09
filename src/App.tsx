@@ -18,11 +18,11 @@ import {
   CANVAS_WIDTH,
   FPS_OPTIONS,
   LOGO_URL,
-  type FontName,
 } from "./constants/editor";
 import { hsvToHex } from "./canvas/operations";
 import { composeFrame, drawObjects } from "./canvas/frameRenderer";
-import { projectRepository, readPreferences } from "./services/projectRepository";
+import { renderRasterSelection } from './canvas/rasterSelection';
+import { LEGACY_KEY, projectRepository, readPreferences } from "./services/projectRepository";
 import { commitStickerToFrame, commitTextToFrame, hasSelectionChanged, hasStickerChanged, hasTextChanged } from "./domain/transaction";
 import { useAnimationPlayback } from "./hooks/useAnimationPlayback";
 import { useFrameHistory } from "./hooks/useFrameHistory";
@@ -50,14 +50,19 @@ export default function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [requestedProjectId, setRequestedProjectId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [startupError, setStartupError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const loadGeneration = useRef(0);
 
-  useEffect(() => {
-    projectRepository.migrateLegacyProject().catch(() => {}).finally(() => {
-      setReady(true);
-    });
+  const initialize = useCallback(async () => {
+    try {
+      await projectRepository.migrateLegacyProject();
+      setStartupError(localStorage.getItem(LEGACY_KEY) ? 'Старые данные сохранены, но их перенос не подтверждён. Доступные мультики можно открывать; исходная запись остаётся в браузере.' : null);
+    }
+    catch (error) { setStartupError(`Не удалось перенести старые данные. Исходные записи сохранены. ${error instanceof Error ? error.message : ''}`); }
+    finally { setReady(true); }
   }, []);
+  useEffect(() => { void initialize(); }, [initialize]);
 
   const handleOpenProject = async (id: string) => {
     setRequestedProjectId(id);
@@ -128,7 +133,7 @@ export default function App() {
       </div>
     </div>
   </div>;
-  return <HomeScreen onOpenProject={handleOpenProject} />;
+  return <HomeScreen onOpenProject={handleOpenProject} startupError={startupError} onRetryStartup={initialize} />;
 }
 
 function Editor({
@@ -209,9 +214,6 @@ function Editor({
   const selectionTool = useSelection({
     frames,
     currentFrame,
-    baseCanvasRef,
-    mainCanvasRef,
-    loadedFrameIdRef,
     saveState,
   });
 
@@ -254,8 +256,10 @@ function Editor({
       baseCanvasRef.current &&
       loadedFrameIdRef.current === sel.ownerFrameId
     ) {
+      const ownerBase = baseCanvasRef.current;
       const img = new Image();
       img.onload = () => {
+        if (loadedFrameIdRef.current !== sel.ownerFrameId || baseCanvasRef.current !== ownerBase) return;
         const baseCtx = baseCanvasRef.current?.getContext("2d");
         const mainCtx = mainCanvasRef.current?.getContext("2d", { willReadFrequently: true });
         if (baseCtx) {
@@ -329,31 +333,15 @@ function Editor({
       const targetFrame = currentFrames.find((f) => f.id === ownerId);
       if (targetFrame) {
         if (hasSelectionChanged(sel)) {
-          const canvas = document.createElement("canvas");
-          canvas.width = CANVAS_WIDTH;
-          canvas.height = CANVAS_HEIGHT;
-          const ctx = canvas.getContext("2d");
-          if (ctx) {
-            if (baseCanvasRef.current && loadedFrameIdRef.current === ownerId) {
-              ctx.drawImage(baseCanvasRef.current, 0, 0);
-            }
-            ctx.drawImage(sel.canvas, sel.x, sel.y, sel.width, sel.height);
-            const newBitmap = canvas.toDataURL("image/png");
-            const updated = { ...targetFrame, bitmap: newBitmap, preview: composeFrame(canvas, targetFrame.objects) };
-            currentFrames = currentFrames.map((f) => (f.id === ownerId ? updated : f));
-            changed = true;
-            if (baseCanvasRef.current && loadedFrameIdRef.current === ownerId) {
-              const baseCtx = baseCanvasRef.current.getContext("2d");
-              if (baseCtx) {
-                baseCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-                baseCtx.drawImage(canvas, 0, 0);
-              }
-            }
-          }
+          const updated = renderRasterSelection(targetFrame, sel);
+          currentFrames = currentFrames.map(f => f.id === ownerId ? updated : f);
+          changed = true;
         } else if (sel.originalBitmap) {
           if (baseCanvasRef.current && loadedFrameIdRef.current === ownerId) {
+            const ownerBase = baseCanvasRef.current;
             const img = new Image();
             img.onload = () => {
+              if (loadedFrameIdRef.current !== ownerId || baseCanvasRef.current !== ownerBase) return;
               const baseCtx = baseCanvasRef.current?.getContext("2d");
               const mainCtx = mainCanvasRef.current?.getContext("2d", { willReadFrequently: true });
               if (baseCtx) {
@@ -474,6 +462,11 @@ function Editor({
     persistenceEnabled,
     isPlaying,
     project!,
+    commitPendingChanges,
+    () => Boolean(canvasDrawing.isDrawingRef.current ||
+      (textTool.activeTextRef.current && hasTextChanged(textTool.activeTextRef.current)) ||
+      (stickerTool.activeStickerRef.current && hasStickerChanged(stickerTool.activeStickerRef.current)) ||
+      (selectionTool.activeSelectionRef.current && hasSelectionChanged(selectionTool.activeSelectionRef.current))),
   );
 
   // Undo / Redo
@@ -555,6 +548,7 @@ function Editor({
     setLeaving(true);
     setIsPlaying(false);
     try {
+      await frameManager.waitForImport();
       await persistence.flush(commitPendingChanges());
       onBackToHome?.();
     } catch {
@@ -564,7 +558,7 @@ function Editor({
   };
 
   return (
-    <div className="flex flex-col h-screen bg-blue-50 font-sans text-gray-800">
+    <div className="editor-screen flex flex-col h-dvh bg-blue-50 font-sans text-gray-800">
       {(loadError || persistence.error || frameManager.canvasError) && (
         <div role="alert" className="bg-red-100 text-red-800 px-4 py-2 text-sm">
           {loadError || persistence.error || frameManager.canvasError}

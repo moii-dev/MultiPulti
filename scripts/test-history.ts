@@ -3,10 +3,10 @@ import { test } from 'node:test';
 import { createHistory, commitFrames, undo, redo, canUndo, canRedo } from '../src/domain/history';
 import { createFrame, copyFrame, deleteFrame, reorderFrame } from '../src/domain/project';
 import {
-  commitTextToFrame, commitStickerToFrame, hasSelectionChanged,
-  hasTextChanged, hasStickerChanged, resolvePendingForFrameSwitch
+  commitTextToFrame, hasSelectionChanged,
+  hasTextChanged, resolvePendingForFrameSwitch
 } from '../src/domain/transaction';
-import type { ActiveSelection, ActiveSticker, ActiveText, Frame } from '../src/types/editor';
+import type { ActiveSelection, ActiveSticker, ActiveText } from '../src/types/editor';
 
 const bitmapBlank = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jB9kAAAAASUVORK5CYII=';
 const bitmapStrokeA = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -357,4 +357,3 @@ test('PENDING: selection / text / sticker -> switch frame -> correct isolated re
   const rUnchanged = resolvePendingForFrameSwitch(frames, { selection: unchangedSel });
   assert.equal(rUnchanged.hasCommitted, false);
 });
-

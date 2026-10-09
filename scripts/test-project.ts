@@ -127,7 +127,7 @@ test('IndexedDB unavailable does not consume legacy source', async () => {
   assert.ok(local.getItem(LEGACY_KEY));
 });
 test('quota error rolls back save and preserves both previous project and legacy', async () => {
-  const { repo, local } = setup(); const original = project();
+  const { repo } = setup(); const original = project();
   await repo.saveProject(original);
   const originalPut = IDBObjectStore.prototype.put;
   IDBObjectStore.prototype.put = function () { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
@@ -167,7 +167,10 @@ test('preferences failure after migration preserves source and recovers next lau
 test('valid IndexedDB project takes priority over corrupted legacy', async () => {
   const { local, repo } = setup(); const value = project(); await repo.saveProject(value);
   local.setItem(LEGACY_KEY, '{');
-  assert.deepEqual(await repo.migrateLegacyProject(), value);
+  const promoted = await repo.migrateLegacyProject();
+  assert.deepEqual(promoted?.frames, value.frames);
+  assert.equal(promoted?.currentFrameId, value.currentFrameId);
+  assert.ok(promoted?.id);
   assert.equal(local.getItem(LEGACY_KEY), '{');
 });
 test('save queue orders writes and continues after failure', async () => {

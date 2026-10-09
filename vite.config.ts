@@ -6,6 +6,8 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    // Avoid a dev-server reload in the middle of the first GIF export.
+    optimizeDeps: { include: ['gifenc'] },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

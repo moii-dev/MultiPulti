@@ -9,6 +9,7 @@ export function createProjectSaveSession(initial: Project, save: (project: Proje
   return {
     dirty: (project: Project) => pending > 0 || fingerprint(project) !== saved,
     flush(project: Project) {
+      if (project.id !== initial.id) return Promise.reject(new Error('Нельзя сохранить другой проект в этой сессии'));
       const snapshot = structuredClone(project);
       pending++;
       const result = tail.catch(() => {}).then(async () => {

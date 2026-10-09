@@ -1,24 +1,18 @@
-import type React from "react";
 import { useState, useRef, useCallback } from "react";
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from "../constants/editor";
+import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../constants/editor';
 import { playAction, playPop } from "../utils/audio";
+import { renderRasterSelection } from '../canvas/rasterSelection';
 import type { ActiveSelection, Frame } from "../types/editor";
 
 interface UseSelectionProps {
   frames: Frame[];
   currentFrame: number;
-  baseCanvasRef: React.RefObject<HTMLCanvasElement | null>;
-  mainCanvasRef: React.RefObject<HTMLCanvasElement | null>;
-  loadedFrameIdRef: React.RefObject<string | null>;
   saveState: (framesOrUpdater: Frame[] | ((prev: Frame[]) => Frame[])) => void;
 }
 
 export function useSelection({
   frames,
   currentFrame,
-  baseCanvasRef,
-  mainCanvasRef,
-  loadedFrameIdRef,
   saveState,
 }: UseSelectionProps) {
   const [activeSelection, setActiveSelection] = useState<ActiveSelection | null>(null);
@@ -34,35 +28,10 @@ export function useSelection({
       const ownerFrameId = updatedSelection.ownerFrameId ?? frames[currentFrameRef.current]?.id;
       if (!ownerFrameId) return;
 
-      const canvas = document.createElement("canvas");
-      canvas.width = CANVAS_WIDTH;
-      canvas.height = CANVAS_HEIGHT;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      if (baseCanvasRef.current && loadedFrameIdRef.current === ownerFrameId) {
-        ctx.drawImage(baseCanvasRef.current, 0, 0);
-      }
-      ctx.drawImage(
-        updatedSelection.canvas,
-        updatedSelection.x,
-        updatedSelection.y,
-        updatedSelection.width,
-        updatedSelection.height,
-      );
-      const newBitmap = canvas.toDataURL("image/png");
-
-      saveState((prev) =>
-        prev.map((f) => (f.id === ownerFrameId ? { ...f, bitmap: newBitmap, preview: newBitmap } : f)),
-      );
-
-      if (baseCanvasRef.current && loadedFrameIdRef.current === ownerFrameId) {
-        const baseCtx = baseCanvasRef.current.getContext("2d");
-        if (baseCtx) {
-          baseCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-          baseCtx.drawImage(canvas, 0, 0);
-        }
-      }
+      const target = frames.find(f => f.id === ownerFrameId);
+      if (!target) return;
+      const updated = renderRasterSelection(target, updatedSelection);
+      saveState(prev => prev.map(f => f.id === ownerFrameId ? updated : f));
 
       setActiveSelection({
         ...updatedSelection,
@@ -70,11 +39,11 @@ export function useSelection({
         initialY: updatedSelection.y,
         initialWidth: updatedSelection.width,
         initialHeight: updatedSelection.height,
-        originalBitmap: newBitmap,
+        originalBitmap: updated.bitmap,
         hasChanged: false,
       });
     },
-    [baseCanvasRef, frames, loadedFrameIdRef, saveState],
+    [frames, saveState],
   );
 
   const scaleSelection = useCallback(
@@ -151,16 +120,12 @@ export function useSelection({
 
   const deleteSelection = useCallback(() => {
     if (!activeSelection) return;
-    const mainCanvas = mainCanvasRef.current;
-    if (mainCanvas) {
-      const bitmap = mainCanvas.toDataURL("image/png");
-      const owner = activeSelection.ownerFrameId ?? frames[currentFrameRef.current]?.id;
-      if (owner) {
-        saveState((prev) => prev.map((f) => (f.id === owner ? { ...f, bitmap, preview: bitmap } : f)));
-      }
+    const owner = activeSelection.ownerFrameId ?? frames[currentFrameRef.current]?.id;
+    if (owner) {
+      saveState(prev => prev.map(f => f.id === owner ? renderRasterSelection(f, activeSelection, false) : f));
     }
     setActiveSelection(null);
-  }, [activeSelection, frames, mainCanvasRef, saveState]);
+  }, [activeSelection, frames, saveState]);
 
   const clearSelection = useCallback(() => {
     setActiveSelection(null);

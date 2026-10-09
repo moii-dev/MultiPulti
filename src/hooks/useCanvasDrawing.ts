@@ -1,4 +1,5 @@
 import type React from "react";
+import { extractRasterSelection } from '../canvas/rasterSelection';
 import { useRef, useEffect, useCallback } from "react";
 import {
   CANVAS_HEIGHT,
@@ -16,7 +17,6 @@ import {
 } from "../canvas/operations";
 import { drawObjects, hitObject } from "../canvas/frameRenderer";
 import {
-  eraseObjectPixels,
   findConnectedObject,
   findObjectInRect,
 } from "../utils/extractObject";
@@ -114,6 +114,9 @@ export function useCanvasDrawing(props: UseCanvasDrawingProps) {
 
   // Single primary pointer ID tracker to guard multi-touch & pen collision
   const activePointerIdRef = useRef<number | null>(null);
+  const feedbackTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const focusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => { clearTimeout(feedbackTimer.current); clearTimeout(focusTimer.current); }, []);
 
   // Drawing refs
   const isDrawingRef = useRef(false);
@@ -340,6 +343,11 @@ export function useCanvasDrawing(props: UseCanvasDrawingProps) {
 
       if (activeSelection) {
         if (isSelectionPixelAt(activeSelection, x, y)) {
+          if (activeSelection.backgroundCanvas && activeSelection.backgroundFrame) {
+            mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            mainCtx.drawImage(activeSelection.backgroundCanvas, 0, 0);
+            drawObjects(mainCtx, activeSelection.backgroundFrame.objects);
+          }
           isMovingSelectionRef.current = true;
           startPosRef.current = { x, y };
           initialSelectionPosRef.current = {
@@ -352,30 +360,17 @@ export function useCanvasDrawing(props: UseCanvasDrawingProps) {
         }
       }
 
-      const extractedObject = findConnectedObject(mainCtx, x, y);
-      if (extractedObject) {
-        const originalBitmap = frames[currentFrame].bitmap;
-        eraseObjectPixels(mainCtx, extractedObject.pixelOffsets);
-        const sel: ActiveSelection = {
-          ownerFrameId: frames[currentFrame].id,
-          canvas: extractedObject.canvas,
-          x: extractedObject.x,
-          y: extractedObject.y,
-          width: extractedObject.width,
-          height: extractedObject.height,
-          initialX: extractedObject.x,
-          initialY: extractedObject.y,
-          initialWidth: extractedObject.width,
-          initialHeight: extractedObject.height,
-          originalBitmap,
-          hasChanged: false,
-        };
+      const sel = baseCanvasRef.current && extractRasterSelection(frames[currentFrame], baseCanvasRef.current, ctx => findConnectedObject(ctx, x, y));
+      if (sel) {
+        mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        mainCtx.drawImage(sel.backgroundCanvas!, 0, 0);
+        drawObjects(mainCtx, sel.backgroundFrame!.objects);
         setActiveSelection(sel);
         isMovingSelectionRef.current = true;
         startPosRef.current = { x, y };
         initialSelectionPosRef.current = {
-          x: extractedObject.x,
-          y: extractedObject.y,
+          x: sel.x,
+          y: sel.y,
         };
         playPop();
       } else {
@@ -494,7 +489,8 @@ export function useCanvasDrawing(props: UseCanvasDrawingProps) {
           isNew: true,
         });
         setTextInput("");
-        setTimeout(() => textInputRef.current?.focus(), 10);
+        clearTimeout(focusTimer.current);
+        focusTimer.current = setTimeout(() => textInputRef.current?.focus(), 10);
         return;
       }
     }
@@ -731,30 +727,18 @@ export function useCanvasDrawing(props: UseCanvasDrawingProps) {
           mainCanvas &&
           mainCtx
         ) {
-          const extractedObject = findObjectInRect(
-            mainCtx,
+          const sel = baseCanvasRef.current && extractRasterSelection(frames[currentFrame], baseCanvasRef.current, ctx => findObjectInRect(
+            ctx,
             selectionStart.x,
             selectionStart.y,
             x,
             y,
-          );
-          if (extractedObject) {
-            const originalBitmap = frames[currentFrame].bitmap;
-            eraseObjectPixels(mainCtx, extractedObject.pixelOffsets);
-            setActiveSelection({
-              ownerFrameId: frames[currentFrame].id,
-              canvas: extractedObject.canvas,
-              x: extractedObject.x,
-              y: extractedObject.y,
-              width: extractedObject.width,
-              height: extractedObject.height,
-              initialX: extractedObject.x,
-              initialY: extractedObject.y,
-              initialWidth: extractedObject.width,
-              initialHeight: extractedObject.height,
-              originalBitmap,
-              hasChanged: false,
-            });
+          ));
+          if (sel) {
+            mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            mainCtx.drawImage(sel.backgroundCanvas!, 0, 0);
+            drawObjects(mainCtx, sel.backgroundFrame!.objects);
+            setActiveSelection(sel);
             playPop();
           }
         }
@@ -831,7 +815,8 @@ export function useCanvasDrawing(props: UseCanvasDrawingProps) {
           text: PRAISE_MESSAGES[Math.floor(Math.random() * PRAISE_MESSAGES.length)],
           id: Date.now(),
         });
-        setTimeout(() => setFeedback(null), 2000);
+        clearTimeout(feedbackTimer.current);
+        feedbackTimer.current = setTimeout(() => setFeedback(null), 2000);
       }
       return;
     }

@@ -13,13 +13,11 @@ import {
   updatePointerGesture,
   finishPointerGesture,
   cancelPointerGesture,
-  type PointerGestureState,
 } from "../src/canvas/pointerLifecycle";
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from "../src/constants/editor";
 import { createFrame } from "../src/domain/project";
 import { createHistory } from "../src/domain/history";
 import { resolvePendingForFrameSwitch } from "../src/domain/transaction";
-import type { ActiveSelection, ActiveSticker, ActiveText } from "../src/types/editor";
+import type { ActiveSticker, ActiveText } from "../src/types/editor";
 
 test("COORDINATES: 1:1 scale maps client coordinates directly to canvas space", () => {
   const rect = { left: 0, top: 0, width: 800, height: 600 };

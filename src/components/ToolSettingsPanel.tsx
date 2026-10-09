@@ -1,4 +1,5 @@
-import { BookTemplate, Check, FlipHorizontal, Palette, Smile, Wand2, X } from "lucide-react";
+import { useEffect, useRef, useState } from 'react';
+import { BookTemplate, Check, FlipHorizontal, Palette, Settings, Smile, Wand2, X } from "lucide-react";
 import { AVAILABLE_FONTS, BASIC_COLORS, BRUSH_SIZES, SHAPES, TOOLS, type FontName } from "../constants/editor";
 import type { ActiveSelection, ActiveSticker, ActiveText, ShapeId, ToolId } from "../types/editor";
 import { cn } from "../utils/cn";
@@ -37,14 +38,19 @@ interface ToolSettingsPanelProps {
 }
 
 export function ToolSettingsPanel(props: ToolSettingsPanelProps) {
-  return (
-    <aside
-      className={cn(
-        "bg-blue-50/50 flex flex-col pt-0 pb-6 overflow-y-auto no-scrollbar shrink-0 z-30 transition-all duration-300",
-        "w-48 sm:w-60",
-        "hidden md:flex",
-      )}
-    >
+  const [open, setOpen] = useState(false);
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (open) dialog.current?.showModal();
+    else dialog.current?.close();
+  }, [open]);
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 768px)');
+    const close = () => { if (media.matches) setOpen(false); };
+    media.addEventListener('change', close);
+    return () => media.removeEventListener('change', close);
+  }, []);
+  const content = <>
       <div className="bg-white py-3 sm:py-4 px-3 sm:px-4 border-b-4 border-black mb-3 sm:mb-4 sticky top-0 z-10 shadow-sm flex items-center justify-between">
         <span className="font-black text-base sm:text-lg uppercase tracking-wider text-black">
           {props.tool === "pipette" ? "Цвет" : TOOLS.find((option) => option.id === props.tool)?.label}
@@ -142,7 +148,7 @@ export function ToolSettingsPanel(props: ToolSettingsPanelProps) {
                 <FlipHorizontal className="w-6 h-6 shrink-0" />
                 <span className="text-xs font-bold leading-none text-left">Симметрия</span>
               </button>
-              <button className={cn("btn-kid p-3 flex items-center justify-start gap-3 w-full", props.activeTemplate && "bg-green-100 border-green-400 text-green-600")} onClick={props.onOpenTemplates} title="Шаблоны для обводки" aria-label="Шаблоны для обводки">
+              <button className={cn("btn-kid p-3 flex items-center justify-start gap-3 w-full", props.activeTemplate && "bg-green-100 border-green-400 text-green-600")} onClick={() => { setOpen(false); props.onOpenTemplates(); }} title="Шаблоны для обводки" aria-label="Шаблоны для обводки">
                 <BookTemplate className="w-6 h-6 shrink-0" />
                 <span className="text-xs font-bold leading-none text-left">Шаблоны</span>
               </button>
@@ -155,7 +161,7 @@ export function ToolSettingsPanel(props: ToolSettingsPanelProps) {
             <SettingsLabel>Цвет</SettingsLabel>
             <div className="relative mb-2">
               <div className="w-16 h-16 rounded-full border-4 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] flex items-center justify-center transition-colors" style={{ backgroundColor: props.color }} />
-              <button className="absolute -bottom-2 -right-2 bg-white rounded-full p-2 border-4 border-black shadow-sm hover:scale-110 active:scale-95 transition-transform" onClick={props.onOpenColors} title="Больше цветов" aria-label="Открыть полную палитру цветов">
+              <button className="absolute -bottom-2 -right-2 bg-white rounded-full p-2 border-4 border-black shadow-sm hover:scale-110 active:scale-95 transition-transform" onClick={() => { setOpen(false); props.onOpenColors(); }} title="Больше цветов" aria-label="Открыть полную палитру цветов">
                 <Palette className="w-5 h-5 text-pink-500" />
               </button>
             </div>
@@ -169,10 +175,10 @@ export function ToolSettingsPanel(props: ToolSettingsPanelProps) {
         {props.tool === "sticker" && (
           <div className="flex flex-col items-center gap-3">
             <SettingsLabel>Выбран</SettingsLabel>
-            <button className="text-6xl hover:scale-110 transition-transform p-4 rounded-3xl bg-white border-4 border-blue-200 w-full flex justify-center shadow-sm" onClick={props.onOpenStickers} title="Выбрать другой стикер" aria-label={`Выбран стикер ${props.selectedSticker}. Нажми для выбора другого`}>
+            <button className="text-6xl hover:scale-110 transition-transform p-4 rounded-3xl bg-white border-4 border-blue-200 w-full flex justify-center shadow-sm" onClick={() => { setOpen(false); props.onOpenStickers(); }} title="Выбрать другой стикер" aria-label={`Выбран стикер ${props.selectedSticker}. Нажми для выбора другого`}>
               {props.selectedSticker}
             </button>
-            <button className="btn-kid w-full py-3 bg-blue-100 flex gap-2 justify-center mt-2" onClick={props.onOpenStickers} aria-label="Выбрать другой стикер">
+            <button className="btn-kid w-full py-3 bg-blue-100 flex gap-2 justify-center mt-2" onClick={() => { setOpen(false); props.onOpenStickers(); }} aria-label="Выбрать другой стикер">
               <Smile className="w-5 h-5" /> Изменить
             </button>
             {props.activeSticker && (
@@ -188,8 +194,15 @@ export function ToolSettingsPanel(props: ToolSettingsPanelProps) {
           </div>
         )}
       </div>
-    </aside>
-  );
+    </>;
+  return <>
+    <button type="button" className="btn-kid absolute top-2 right-2 z-30 md:hidden px-3 py-2 text-sm gap-2" onClick={() => setOpen(true)} aria-label="Настройки инструмента"><Settings className="w-5 h-5" />Настройки</button>
+    <aside className="bg-blue-50/50 hidden md:flex flex-col pt-0 pb-6 overflow-y-auto no-scrollbar shrink-0 z-30 w-60">{content}</aside>
+    <dialog ref={dialog} className="tool-settings-dialog" aria-label="Настройки инструмента" onCancel={event => { event.preventDefault(); setOpen(false); }}>
+      <button type="button" className="btn-kid p-2 ml-auto mb-2" aria-label="Закрыть настройки" onClick={() => setOpen(false)}><X className="w-5 h-5" /></button>
+      <div>{content}</div>
+    </dialog>
+  </>;
 }
 
 function SettingsLabel({ children }: { children: string }) {

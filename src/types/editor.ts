@@ -61,6 +61,7 @@ export interface Project {
 }
 
 export interface ProjectSummary {
+  damaged?: boolean;
   id: string;
   title: string;
   version: 2;
@@ -79,6 +80,9 @@ export interface StoredAppState {
 }
 
 export interface ActiveSelection {
+  backgroundCanvas?: HTMLCanvasElement;
+  backgroundFrame?: Frame;
+  rasterLayerId?: string;
   ownerFrameId?: string;
   canvas: HTMLCanvasElement;
   x: number;

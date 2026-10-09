@@ -36,6 +36,11 @@ function isObject(value: unknown): value is CanvasObject {
 }
 export function validateProject(value: unknown): Project {
   if (!record(value) || value.version !== 2 || !Array.isArray(value.frames) || !value.frames.length) throw new Error('Повреждённый проект или неизвестная версия схемы');
+  if ((value.id !== undefined && (typeof value.id !== 'string' || !value.id)) ||
+      (value.title !== undefined && typeof value.title !== 'string') ||
+      [value.createdAt, value.updatedAt].some(date => date !== undefined && (!finite(date) || Math.abs(date as number) > 8.64e15))) {
+    throw new Error('Повреждённые метаданные проекта');
+  }
   const ids = new Set<string>();
   for (const frame of value.frames) {
     if (!record(frame) || typeof frame.id !== 'string' || !frame.id || ids.has(frame.id) || !isBitmap(frame.bitmap) || !isBitmap(frame.preview) || !Array.isArray(frame.objects) || !Array.from(frame.objects).every(isObject) || new Set(frame.objects.map(object => object.id)).size !== frame.objects.length) throw new Error('Повреждённые данные кадра');
@@ -76,14 +81,15 @@ export function generateCopyTitle(originalTitle: string, existingTitles: string[
 
   const existingSet = new Set(existingTitles.map(t => t.trim().toLowerCase()));
 
-  const candidate1 = `${root} — копия`;
+  const candidate = (suffix: string) => `${root.slice(0, MAX_PROJECT_TITLE_LENGTH - suffix.length).trimEnd()}${suffix}`;
+  const candidate1 = candidate(' — копия');
   if (!existingSet.has(candidate1.toLowerCase())) {
     return candidate1;
   }
 
   let counter = 2;
   while (true) {
-    const candidateN = `${root} — копия ${counter}`;
+    const candidateN = candidate(` — копия ${counter}`);
     if (!existingSet.has(candidateN.toLowerCase())) {
       return candidateN;
     }

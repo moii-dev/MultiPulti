@@ -123,7 +123,7 @@ export function DrawingStage(props: DrawingStageProps) {
         )}
         {props.isPlaying && (
           <div className="absolute top-4 right-4 bg-red-500 text-white px-4 py-2 rounded-full font-bold animate-pulse border-4 border-black">
-            🔴 ЗАПИСЬ
+            ▶ ПРОСМОТР
           </div>
         )}
       </div>

@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "tsx --test scripts/test-project.ts scripts/test-project-management.ts scripts/test-history.ts scripts/test-canvas-interaction.ts scripts/test-project-integration.ts"
+    "test": "tsx --test scripts/test-project.ts scripts/test-project-management.ts scripts/test-history.ts scripts/test-canvas-interaction.ts scripts/test-project-integration.ts scripts/test-release.ts",
+    "test:browser": "node --test scripts/test-browser.cjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

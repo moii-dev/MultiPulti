@@ -37,8 +37,8 @@ export function HeaderToolbar({
   onSaveGif,
 }: HeaderToolbarProps) {
   return (
-    <header className="h-14 sm:h-16 bg-white border-b-4 border-black flex items-center justify-between px-2 sm:px-4 shrink-0 z-10 shadow-sm">
-      <div className="flex items-center gap-1.5 sm:gap-2">
+    <header className="min-h-14 lg:h-16 bg-white border-b-4 border-black flex flex-wrap lg:flex-nowrap gap-2 items-center justify-between px-2 sm:px-4 py-2 lg:py-0 shrink-0 z-10 shadow-sm">
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
         {onBackToHome && (
           <button
             type="button"
@@ -79,7 +79,7 @@ export function HeaderToolbar({
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-1 sm:gap-2">
+      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
         <button
           className="btn-kid p-1.5 sm:p-2 text-blue-600"
           onClick={onUndo}

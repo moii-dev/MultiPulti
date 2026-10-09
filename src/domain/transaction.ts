@@ -1,4 +1,4 @@
-import type { ActiveSelection, ActiveSticker, ActiveText, CanvasObject, Frame, StickerObject, TextObject } from '../types/editor';
+import type { ActiveSelection, ActiveSticker, ActiveText, Frame, StickerObject, TextObject } from '../types/editor';
 import { createId, upsertObject } from './project';
 
 export function hasSelectionChanged(selection: ActiveSelection): boolean {
@@ -143,4 +143,3 @@ export function resolvePendingForFrameSwitch(
 
   return { frames: modifiedFrames, hasCommitted };
 }
-

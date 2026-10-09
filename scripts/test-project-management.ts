@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { IDBFactory } from 'fake-indexeddb';
 import {
-  cloneProject,
   createFrame,
   generateCopyTitle,
   validateProjectTitle,
@@ -287,9 +286,9 @@ test('LIST: listProjects возвращает корректную структ�
   const { repo } = setup();
   const p1 = await repo.createProject('Старый');
   await new Promise((r) => setTimeout(r, 10));
-  const p2 = await repo.createProject('Средний');
+  await repo.createProject('Средний');
   await new Promise((r) => setTimeout(r, 10));
-  const p3 = await repo.createProject('Свежий');
+  await repo.createProject('Свежий');
 
   let list = await repo.listProjects();
   assert.equal(list[0].title, 'Свежий');
@@ -305,4 +304,3 @@ test('LIST: listProjects возвращает корректную структ�
   assert.equal(list[1].title, 'Свежий');
   assert.equal(list[2].title, 'Средний');
 });
-
