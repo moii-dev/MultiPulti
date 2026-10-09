@@ -52,3 +52,74 @@ export function migrateLegacy(value: unknown): Project {
   const frames = entry.frames.map(createFrame);
   return { version: 2, frames, currentFrameId: frames[clamp(value.currentFrame, frames.length - 1)].id };
 }
+
+export const DEFAULT_PROJECT_TITLE = 'Новый мультик';
+export const MAX_PROJECT_TITLE_LENGTH = 50;
+export const BLANK_FRAME_BITMAP = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jB9kAAAAASUVORK5CYII=';
+
+export function validateProjectTitle(title: unknown): string {
+  if (typeof title !== 'string') throw new Error('Название должно быть строкой');
+  const trimmed = title.trim();
+  if (!trimmed) throw new Error('Название не может быть пустым');
+  if (trimmed.length > MAX_PROJECT_TITLE_LENGTH) {
+    throw new Error(`Название не может быть длиннее ${MAX_PROJECT_TITLE_LENGTH} символов`);
+  }
+  return trimmed;
+}
+
+export function generateCopyTitle(originalTitle: string, existingTitles: string[] = []): string {
+  const base = (originalTitle || DEFAULT_PROJECT_TITLE).trim();
+  const copyPattern = /^(.*?)(?:\s*—\s*копия(?:\s+(\d+))?)?$/;
+  const match = base.match(copyPattern);
+  const root = match && match[1] && match[1].trim() ? match[1].trim() : base;
+
+  const existingSet = new Set(existingTitles.map(t => t.trim().toLowerCase()));
+
+  const candidate1 = `${root} — копия`;
+  if (!existingSet.has(candidate1.toLowerCase())) {
+    return candidate1;
+  }
+
+  let counter = 2;
+  while (true) {
+    const candidateN = `${root} — копия ${counter}`;
+    if (!existingSet.has(candidateN.toLowerCase())) {
+      return candidateN;
+    }
+    counter++;
+  }
+}
+
+export function cloneProject(original: Project, existingTitles: string[] = []): Project {
+  const newId = createId();
+  const newTitle = generateCopyTitle(original.title || DEFAULT_PROJECT_TITLE, existingTitles);
+  const newFrames = original.frames.map(copyFrame);
+  const originalIdx = Math.max(0, original.frames.findIndex(f => f.id === original.currentFrameId));
+  const newCurrentFrameId = newFrames[originalIdx]?.id ?? newFrames[0]?.id ?? createId();
+  const now = Date.now();
+
+  return {
+    id: newId,
+    title: newTitle,
+    version: 2,
+    frames: newFrames,
+    currentFrameId: newCurrentFrameId,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function createNewProject(title?: string, initialBitmap: string = BLANK_FRAME_BITMAP): Project {
+  const cleanTitle = validateProjectTitle(title ?? DEFAULT_PROJECT_TITLE);
+  const frame = createFrame(initialBitmap);
+  const now = Date.now();
+  return {
+    id: createId(),
+    title: cleanTitle,
+    version: 2,
+    frames: [frame],
+    currentFrameId: frame.id,
+    createdAt: now,
+    updatedAt: now,
+  };
+}

@@ -4,6 +4,7 @@ import { HeaderToolbar } from "./components/HeaderToolbar";
 import { Timeline } from "./components/Timeline";
 import { ToolsPanel } from "./components/ToolsPanel";
 import { ToolSettingsPanel } from "./components/ToolSettingsPanel";
+import { HomeScreen } from "./components/HomeScreen";
 import {
   ColorPickerModal,
   SelectionContextMenu,
@@ -21,9 +22,8 @@ import {
 } from "./constants/editor";
 import { hsvToHex } from "./canvas/operations";
 import { composeFrame, drawObjects } from "./canvas/frameRenderer";
-import { readPreferences } from "./services/projectRepository";
+import { projectRepository, readPreferences } from "./services/projectRepository";
 import { commitStickerToFrame, commitTextToFrame, hasSelectionChanged, hasStickerChanged, hasTextChanged } from "./domain/transaction";
-import { useProjectLoader } from "./hooks/useProjectLoader";
 import { useAnimationPlayback } from "./hooks/useAnimationPlayback";
 import { useFrameHistory } from "./hooks/useFrameHistory";
 import { useProjectPersistence } from "./hooks/useProjectPersistence";
@@ -37,31 +37,97 @@ import { playAction, playPop, playSwoosh } from "./utils/audio";
 import type {
   EditorContextMenu,
   Frame,
+  Project,
   ShapeId,
   StoredAppState,
   ToolId,
 } from "./types/editor";
 
 export default function App() {
-  const loaded = useProjectLoader();
-  if (!loaded.ready) return <div role="status">Загрузка проекта…</div>;
-  return (
-    <Editor
-      initialState={loaded.state}
-      persistenceEnabled={loaded.writable}
-      loadError={loaded.error}
-    />
-  );
+  const [screen, setScreen] = useState<"home" | "editor">("home");
+  const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [editorInitialState, setEditorInitialState] = useState<StoredAppState | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    projectRepository.migrateLegacyProject().catch(() => {}).finally(() => {
+      setReady(true);
+    });
+  }, []);
+
+  const handleOpenProject = async (id: string) => {
+    try {
+      setLoadError(null);
+      const loaded = await projectRepository.loadProject(id);
+      if (!loaded) {
+        setLoadError("Не удалось найти выбранный мультик");
+        return;
+      }
+      const preferences = readPreferences();
+      const selected = loaded.frames.findIndex((f) => f.id === preferences.currentFrameId);
+      const currentIdx = selected < 0
+        ? loaded.frames.findIndex((f) => f.id === loaded.currentFrameId)
+        : selected;
+
+      const state: StoredAppState = {
+        history: [{ frames: loaded.frames }],
+        historyIndex: 0,
+        currentFrame: Math.max(0, currentIdx),
+        ...preferences,
+      };
+
+      setActiveProject(loaded);
+      setEditorInitialState(state);
+      setScreen("editor");
+    } catch (err) {
+      console.error("Ошибка загрузки мультика:", err);
+      setLoadError(err instanceof Error ? err.message : "Ошибка загрузки мультика");
+    }
+  };
+
+  const handleBackToHome = () => {
+    setScreen("home");
+    setActiveProject(null);
+  };
+
+  if (!ready) {
+    return (
+      <div role="status" className="h-screen flex items-center justify-center font-black text-xl text-gray-700 bg-[#f0f9ff]">
+        Загрузка MultiPulti…
+      </div>
+    );
+  }
+
+  if (screen === "editor" && editorInitialState) {
+    return (
+      <Editor
+        key={activeProject?.id ?? "editor"}
+        initialState={editorInitialState}
+        persistenceEnabled={true}
+        loadError={loadError}
+        project={activeProject}
+        onBackToHome={handleBackToHome}
+      />
+    );
+  }
+
+  return <HomeScreen onOpenProject={handleOpenProject} />;
 }
 
 function Editor({
   initialState,
   persistenceEnabled,
   loadError,
+  project,
+  onBackToHome,
 }: {
+  key?: string;
   initialState: StoredAppState | null;
   persistenceEnabled: boolean;
   loadError: string | null;
+  project?: Project | null;
+  onBackToHome?: () => void;
 }) {
   const [preferences] = useState(readPreferences);
 
@@ -392,6 +458,9 @@ function Editor({
     fps,
     persistenceEnabled,
     isPlaying,
+    project?.id,
+    project?.title,
+    project?.createdAt,
   );
 
   // Undo / Redo
@@ -470,6 +539,11 @@ function Editor({
     return () => window.removeEventListener("click", closeMenu);
   }, []);
 
+  const handleBackToHome = useCallback(() => {
+    commitPendingChanges();
+    onBackToHome?.();
+  }, [commitPendingChanges, onBackToHome]);
+
   return (
     <div className="flex flex-col h-screen bg-blue-50 font-sans text-gray-800">
       {(loadError || persistenceError || frameManager.canvasError) && (
@@ -479,6 +553,8 @@ function Editor({
       )}
       <HeaderToolbar
         logoUrl={LOGO_URL}
+        projectTitle={project?.title}
+        onBackToHome={onBackToHome ? handleBackToHome : undefined}
         historyIndex={historyIndex}
         historyLength={history.length}
         isPlaying={isPlaying}

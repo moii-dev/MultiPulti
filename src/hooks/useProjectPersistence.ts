@@ -16,6 +16,9 @@ export function useProjectPersistence(
   history: FrameHistoryEntry[], historyIndex: number, currentFrame: number,
   favoriteColors: string[], recentColors: string[], fps: number,
   enabled: boolean, isPlaying: boolean,
+  projectId?: string,
+  projectTitle?: string,
+  createdAt?: number,
 ) {
   const [error, setError] = useState<string | null>(null);
   const [preferenceError, setPreferenceError] = useState<string | null>(null);
@@ -36,11 +39,19 @@ export function useProjectPersistence(
     const timer = window.setTimeout(() => {
       const selected = frames[Math.min(selection.current, frames.length - 1)] ?? frames[0];
       if (!selected) return;
-      enqueueSave({ version: 2, frames, currentFrameId: selected.id })
+      enqueueSave({
+        id: projectId,
+        title: projectTitle,
+        version: 2,
+        frames,
+        currentFrameId: selected.id,
+        createdAt,
+        updatedAt: Date.now(),
+      })
         .then(() => { if (mounted.current) setError(null); })
         .catch(() => { if (mounted.current) setError('Не удалось сохранить проект. Проверьте доступность и свободное место хранилища.'); });
     }, 600);
     return () => { window.clearTimeout(timer); };
-  }, [enabled, frames]);
+  }, [enabled, frames, projectId, projectTitle, createdAt]);
   return error || preferenceError;
 }

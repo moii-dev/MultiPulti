@@ -1,8 +1,10 @@
 import type { ChangeEvent, RefObject } from "react";
-import { Download, Image as ImageIcon, Redo, Save, Trash, Undo } from "lucide-react";
+import { ArrowLeft, Download, Image as ImageIcon, Redo, Save, Trash, Undo } from "lucide-react";
 
 interface HeaderToolbarProps {
   logoUrl: string;
+  projectTitle?: string;
+  onBackToHome?: () => void;
   historyIndex: number;
   historyLength: number;
   isPlaying: boolean;
@@ -19,6 +21,8 @@ interface HeaderToolbarProps {
 
 export function HeaderToolbar({
   logoUrl,
+  projectTitle,
+  onBackToHome,
   historyIndex,
   historyLength,
   isPlaying,
@@ -34,11 +38,46 @@ export function HeaderToolbar({
 }: HeaderToolbarProps) {
   return (
     <header className="h-14 sm:h-16 bg-white border-b-4 border-black flex items-center justify-between px-2 sm:px-4 shrink-0 z-10 shadow-sm">
-      <div className="flex items-center gap-2">
-        <img src={logoUrl} alt="Логотип Мульти-Пульти" className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl sm:rounded-2xl border-2 sm:border-4 border-black object-cover shadow-sm" />
-        <h1 className="text-xl font-black tracking-wider text-black uppercase hidden sm:block" style={{ WebkitTextStroke: "1px white" }}>
-          Мульти-Пульти
-        </h1>
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        {onBackToHome && (
+          <button
+            type="button"
+            onClick={onBackToHome}
+            className="btn-kid p-1.5 sm:p-2 px-2 sm:px-3 text-black flex items-center gap-1 text-xs sm:text-sm font-black mr-0.5 sm:mr-1"
+            title="Все мультики"
+            aria-label="Вернуться ко всем мультикам"
+          >
+            <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5 stroke-[3]" />
+            <span className="hidden md:inline">Мультики</span>
+          </button>
+        )}
+        <div
+          className={`flex items-center gap-2 ${onBackToHome ? "cursor-pointer" : ""}`}
+          onClick={onBackToHome}
+          title={onBackToHome ? "Все мультики" : undefined}
+        >
+          <img
+            src={logoUrl}
+            alt="Логотип Мульти-Пульти"
+            className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl sm:rounded-2xl border-2 sm:border-4 border-black object-cover shadow-sm"
+          />
+          <div className="hidden sm:flex flex-col">
+            <h1
+              className="text-base sm:text-lg font-black tracking-wider text-black uppercase leading-tight"
+              style={{ WebkitTextStroke: "1px white" }}
+            >
+              Мульти-Пульти
+            </h1>
+            {projectTitle && (
+              <span
+                className="text-xs font-bold text-gray-500 truncate max-w-[120px] md:max-w-[200px]"
+                title={projectTitle}
+              >
+                {projectTitle}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
       <div className="flex items-center gap-1 sm:gap-2">
         <button

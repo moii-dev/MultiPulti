@@ -50,9 +50,23 @@ export interface Frame {
   preview: string;
 }
 export interface Project {
+  id?: string;
+  title?: string;
   version: 2;
   frames: Frame[];
   currentFrameId: string;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface ProjectSummary {
+  id: string;
+  title: string;
+  version: 2;
+  frameCount: number;
+  preview: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface StoredAppState {

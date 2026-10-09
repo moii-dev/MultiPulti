@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "tsx --test scripts/test-project.ts scripts/test-history.ts scripts/test-canvas-interaction.ts"
+    "test": "tsx --test scripts/test-project.ts scripts/test-project-management.ts scripts/test-history.ts scripts/test-canvas-interaction.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
