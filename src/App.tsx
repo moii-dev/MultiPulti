@@ -48,6 +48,7 @@ export default function App() {
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [editorInitialState, setEditorInitialState] = useState<StoredAppState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [requestedProjectId, setRequestedProjectId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const loadGeneration = useRef(0);
@@ -59,6 +60,7 @@ export default function App() {
   }, []);
 
   const handleOpenProject = async (id: string) => {
+    setRequestedProjectId(id);
     const generation = ++loadGeneration.current;
     setLoading(true);
     setLoadError(null);
@@ -85,7 +87,7 @@ export default function App() {
     } catch (err) {
       if (generation !== loadGeneration.current) return;
       console.error("Ошибка загрузки мультика:", err);
-      setLoadError(err instanceof Error ? err.message : "Ошибка загрузки мультика");
+      setLoadError("Не удалось открыть мультик. Попробуй ещё раз.");
     } finally {
       if (generation === loadGeneration.current) setLoading(false);
     }
@@ -117,8 +119,14 @@ export default function App() {
     );
   }
 
-  if (loadError) return <div role="alert" className="p-8 bg-blue-50 h-screen">
-    <p>{loadError}</p><button className="btn-kid mt-4 p-3" onClick={() => setLoadError(null)}>Мои мультики</button>
+  if (loadError) return <div className="h-dvh overflow-y-auto p-4 sm:p-8 bg-blue-50 flex items-center justify-center">
+    <div role="alert" className="w-full max-w-md bg-white border-4 border-black rounded-[20px] p-6 shadow-[5px_5px_0_black]">
+      <p className="font-bold text-red-800">{loadError}</p>
+      <div className="flex flex-wrap gap-3 mt-5">
+        {requestedProjectId && <button type="button" className="btn-kid bg-yellow-300 p-3" onClick={() => handleOpenProject(requestedProjectId)}>Повторить</button>}
+        <button type="button" className="btn-kid p-3" onClick={() => setLoadError(null)}>Мои мультики</button>
+      </div>
+    </div>
   </div>;
   return <HomeScreen onOpenProject={handleOpenProject} />;
 }

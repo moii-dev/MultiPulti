@@ -4,7 +4,7 @@
   --font-sans: "Nunito", "Comic Sans MS", "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
-@layer utilities {
+@layer components {
   .btn-kid {
     @apply bg-white border-4 border-black rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] 
            hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] 
@@ -59,4 +59,62 @@ body {
   overflow: hidden;
   /* Холст оверлея управляет жестами рисования через touch-none локально; панели и таймлайн должны оставаться прокручиваемыми на тач-устройствах */
   touch-action: manipulation;
+}
+
+/* Project library: scrolling stays local so the canvas editor keeps its layout. */
+.home-screen { height: 100dvh; overflow-y: auto; overflow-x: clip; background: #f0f9ff; }
+.home-header { padding: 16px 24px; }
+.home-brand { max-width: 1280px; margin: auto; display: flex; align-items: center; gap: 12px; }
+.home-brand h1 { font-size: clamp(1.1rem, 4.8vw, 1.875rem); }
+.home-logo { width: 56px; height: 56px; flex-shrink: 0; box-shadow: 3px 3px 0 black; }
+.home-content { width: 100%; max-width: 1328px; margin: auto; padding: 32px 24px 48px; }
+.home-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 24px; }
+.home-section-heading h2 { flex-wrap: wrap; }
+.home-brand h1, .project-details h3, .project-dialog p, .project-dialog h2 { overflow-wrap: anywhere; }
+.home-screen button, .project-dialog button { min-height: 44px; }
+.home-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.home-empty { display: flex; flex-direction: column; align-items: center; gap: 20px; padding: clamp(32px, 7vw, 80px) 20px; max-width: 760px; margin: 40px auto; box-shadow: 6px 6px 0 black; }
+.empty-art { display: grid; place-items: center; font-size: 64px; width: 120px; height: 120px; background: #fef08a; border: 4px solid black; border-radius: 20px; box-shadow: 4px 4px 0 black; transform: rotate(-5deg); margin-bottom: 4px; }
+.project-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+.project-card, .project-skeleton { min-width: 0; background: white; border: 4px solid black; border-radius: 20px; box-shadow: 5px 5px 0 black; }
+.project-card { position: relative; animation: project-appear 180ms ease-out; transition: transform 150ms ease, box-shadow 150ms ease; }
+.project-open { display: block; width: 100%; height: 100%; text-align: left; border-radius: 16px; overflow: hidden; cursor: pointer; }
+.project-open:disabled { cursor: wait; }
+.project-preview { aspect-ratio: 4/3; background: #fffbeb; border-bottom: 4px solid black; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+.project-preview img { width: 100%; height: 100%; object-fit: contain; background: white; }
+.project-frame-count { position: absolute; left: 10px; bottom: 10px; padding: 3px 8px; border: 2px solid black; border-radius: 12px; background: #fde047; color: black; font-size: 12px; font-weight: 900; box-shadow: 2px 2px 0 black; }
+.project-details { padding: 16px 72px 16px 16px; min-height: 100px; }
+.project-menu-trigger { position: absolute; right: 12px; bottom: 24px; width: 44px; height: 44px; }
+.project-menu { position: fixed; z-index: 40; background: white; border: 4px solid black; border-radius: 16px; box-shadow: 5px 5px 0 black; padding: 6px; width: 228px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; animation: project-appear 120ms ease-out; }
+.project-menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 10px; border-radius: 10px; font-size: 14px; font-weight: 900; text-align: left; cursor: pointer; }
+.project-menu button:hover, .project-menu button:focus-visible { background: #fef9c3; }
+.project-menu button:last-child:hover, .project-menu button:last-child:focus-visible { background: #fee2e2; }
+.project-skeleton { overflow: hidden; animation: skeleton-pulse 1.2s ease-in-out infinite alternate; }
+.project-dialog { margin: auto; width: calc(100% - 32px); max-width: 448px; max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; border: 4px solid black; border-radius: 20px; padding: 24px; background: white; color: #1f2937; box-shadow: 6px 6px 0 black; }
+.project-dialog[open] { animation: project-appear 160ms ease-out; }
+.project-dialog::backdrop { background: rgb(0 0 0 / 45%); animation: backdrop-appear 160ms ease-out; }
+.project-dialog.is-closing { animation: project-disappear 140ms ease-in forwards; pointer-events: none; }
+.project-dialog.is-closing::backdrop { animation: backdrop-appear 140ms ease-in reverse forwards; }
+.project-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+@media (min-width: 600px) { .project-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 900px) { .project-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1200px) { .project-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 480px) {
+  .home-header { padding: 12px 16px; }
+  .home-logo { width: 44px; height: 44px; }
+  .home-content { padding: 24px 16px 40px; }
+  .home-section-heading { gap: 16px; }
+  .home-section-heading > button { width: 100%; }
+  .home-empty { padding: 32px 12px; margin: 16px 0; }
+  .project-dialog { padding: 16px; }
+}
+@media (hover: hover) and (pointer: fine) { .project-card:hover { transform: translateY(-3px); box-shadow: 6px 8px 0 black; } }
+.project-card:has(.project-open:active) { transform: translateY(2px); box-shadow: 3px 3px 0 black; }
+@keyframes project-appear { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes project-disappear { to { opacity: 0; transform: translateY(6px); } }
+@keyframes backdrop-appear { from { opacity: 0; } to { opacity: 1; } }
+@keyframes skeleton-pulse { to { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  .project-card:hover, .project-card:has(.project-open:active), .btn-kid:hover, .btn-kid:active { transform: none; }
 }

@@ -1,4 +1,5 @@
-import { useEffect, useRef, type MouseEvent, type KeyboardEvent } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Copy, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import type { ProjectSummary } from "../types/editor";
 
@@ -6,6 +7,8 @@ interface ProjectCardProps {
   key?: string;
   project: ProjectSummary;
   isMenuOpen: boolean;
+  busy: boolean;
+  isCopying: boolean;
   onOpen: (id: string) => void;
   onRename: (project: ProjectSummary) => void;
   onDuplicate: (id: string) => void;
@@ -13,212 +16,79 @@ interface ProjectCardProps {
   onToggleMenu: (id: string) => void;
   onCloseMenu: () => void;
 }
-
-function formatFrameCount(count: number): string {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod100 >= 11 && mod100 <= 19) return `${count} кадров`;
-  if (mod10 === 1) return `${count} кадр`;
-  if (mod10 >= 2 && mod10 <= 4) return `${count} кадра`;
-  return `${count} кадров`;
+const dateFormatter = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+function formatFrameCount(count: number) {
+  const last = count % 10, hundred = count % 100;
+  return `${count} ${hundred >= 11 && hundred <= 19 ? "кадров" : last === 1 ? "кадр" : last >= 2 && last <= 4 ? "кадра" : "кадров"}`;
 }
 
-function formatDate(timestamp: number): string {
-  try {
-    const date = new Date(timestamp);
-    return date.toLocaleDateString("ru-RU", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
-}
-
-export function ProjectCard({
-  project,
-  isMenuOpen,
-  onOpen,
-  onRename,
-  onDuplicate,
-  onDelete,
-  onToggleMenu,
-  onCloseMenu,
-}: ProjectCardProps) {
+export const ProjectCard = memo(function ProjectCard({ project, isMenuOpen, busy, isCopying, onOpen, onRename, onDuplicate, onDelete, onToggleMenu, onCloseMenu }: ProjectCardProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const [position, setPosition] = useState({ left: 0, top: 0 });
+  const [failedPreview, setFailedPreview] = useState<string | null>(null);
+  const menuId = `project-menu-${project.id}`;
+  const restoreTrigger = () => buttonRef.current?.focus({ preventScroll: true });
 
-  // Close menu on click outside
+  useLayoutEffect(() => {
+    if (!isMenuOpen) return;
+    const place = () => {
+      const trigger = buttonRef.current, menu = menuRef.current;
+      if (!trigger || !menu) return;
+      const rect = trigger.getBoundingClientRect();
+      const width = menu.offsetWidth, height = menu.offsetHeight;
+      const margin = 12;
+      const top = rect.top >= height + margin + 8 ? rect.top - height - 8 : rect.bottom + 8;
+      setPosition({ left: Math.max(margin, Math.min(rect.right - width, window.innerWidth - width - margin)), top: Math.max(margin, Math.min(top, window.innerHeight - height - margin)) });
+    };
+    place();
+    menuRef.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
+    window.addEventListener("resize", place);
+    // Reposition on scroll, including scroll events queued by focusing the trigger.
+    const scroll = (event: Event) => { if (!menuRef.current?.contains(event.target as Node)) place(); };
+    window.addEventListener("scroll", scroll, true);
+    return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", scroll, true); };
+  }, [isMenuOpen, onCloseMenu]);
   useEffect(() => {
     if (!isMenuOpen) return;
-    const handleOutsideClick = (event: globalThis.MouseEvent) => {
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(event.target as Node) &&
-        buttonRef.current &&
-        !buttonRef.current.contains(event.target as Node)
-      ) {
-        onCloseMenu();
-      }
+    const outside = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node) && !buttonRef.current?.contains(event.target as Node)) onCloseMenu();
     };
-    window.addEventListener("pointerdown", handleOutsideClick);
-    return () => window.removeEventListener("pointerdown", handleOutsideClick);
+    window.addEventListener("pointerdown", outside);
+    return () => window.removeEventListener("pointerdown", outside);
   }, [isMenuOpen, onCloseMenu]);
 
-  // Close menu on Escape
-  useEffect(() => {
-    if (!isMenuOpen) return;
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        onCloseMenu();
-        buttonRef.current?.focus();
+  return <article className="project-card" aria-busy={isCopying}>
+    <button type="button" disabled={busy} onClick={() => onOpen(project.id)} className="project-open" aria-label={`Открыть мультик «${project.title}»`} aria-describedby={`project-frames-${project.id} project-updated-${project.id}`}>
+      <div className="project-preview">
+        {project.preview && failedPreview !== project.preview ? <img src={project.preview} alt="" loading="lazy" decoding="async" onError={() => setFailedPreview(project.preview)} /> : <div className="flex flex-col items-center gap-2 text-gray-600"><span aria-hidden="true" className="text-5xl">🎨</span><span className="text-sm font-bold">Рисунки ждут тебя!</span></div>}
+        <span id={`project-frames-${project.id}`} className="project-frame-count">{formatFrameCount(project.frameCount)}</span>
+      </div>
+      <div className="project-details">
+        <h3 className="text-lg font-black text-black line-clamp-2 break-words" title={project.title}>{project.title}</h3>
+        <p id={`project-updated-${project.id}`} className="text-xs font-bold text-gray-600 mt-1">Изменён {dateFormatter.format(project.updatedAt)}</p>
+        {isCopying && <p className="text-sm font-bold mt-2">Создаём копию…</p>}
+      </div>
+    </button>
+    <button ref={buttonRef} type="button" disabled={busy} className="btn-kid project-menu-trigger hover:bg-yellow-200" onClick={() => onToggleMenu(project.id)} aria-label={`Действия для «${project.title}»`} aria-haspopup="menu" aria-expanded={isMenuOpen} aria-controls={isMenuOpen ? menuId : undefined}><MoreHorizontal aria-hidden="true" className="w-6 h-6" /></button>
+    {isMenuOpen && createPortal(<div id={menuId} ref={menuRef} role="menu" aria-label={`Меню проекта ${project.title}`} className="project-menu" style={position} onBlur={event => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node) && event.relatedTarget !== buttonRef.current) onCloseMenu();
+    }} onKeyDown={event => {
+      const items = Array.from((event.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>('button'));
+      const index = items.indexOf(document.activeElement as HTMLButtonElement);
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+        event.preventDefault();
+        const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        items[next]?.focus();
+      } else if (event.key === "Escape" || event.key === "Tab") {
+        if (event.key === "Escape") event.preventDefault();
+        restoreTrigger(); onCloseMenu();
       }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isMenuOpen, onCloseMenu]);
-
-  const handleCardClick = () => {
-    onOpen(project.id);
-  };
-
-  const handleMenuButtonClick = (e: MouseEvent) => {
-    e.stopPropagation();
-    onToggleMenu(project.id);
-  };
-
-  const handleMenuKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      onCloseMenu();
-      buttonRef.current?.focus();
-    }
-  };
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={handleCardClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          if (e.target === e.currentTarget) {
-            e.preventDefault();
-            handleCardClick();
-          }
-        }
-      }}
-      className="bg-white rounded-3xl border-4 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all cursor-pointer flex flex-col overflow-hidden text-left relative select-none group"
-      aria-label={`Открыть мультик «${project.title}»`}
-    >
-      {/* Thumbnail area */}
-      <div className="aspect-[4/3] bg-amber-50 border-b-4 border-black relative overflow-hidden flex items-center justify-center">
-        {project.preview ? (
-          <img
-            src={project.preview}
-            alt={`Превью ${project.title}`}
-            className="w-full h-full object-contain bg-white"
-          />
-        ) : (
-          <div className="text-4xl">🎨</div>
-        )}
-
-        {/* Frame count badge */}
-        <span className="absolute bottom-2 left-2 bg-yellow-300 border-2 border-black rounded-xl px-2 py-0.5 text-xs font-black text-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-          {formatFrameCount(project.frameCount)}
-        </span>
-      </div>
-
-      {/* Card details */}
-      <div className="p-3 sm:p-4 flex items-center justify-between gap-2 relative">
-        <div className="flex-1 min-w-0">
-          <h3
-            className="text-lg sm:text-xl font-black text-black truncate tracking-wide"
-            title={project.title}
-          >
-            {project.title}
-          </h3>
-          <p className="text-xs font-bold text-gray-500 mt-0.5">
-            {formatDate(project.updatedAt)}
-          </p>
-        </div>
-
-        {/* Three dots menu button */}
-        <div className="relative shrink-0">
-          <button
-            ref={buttonRef}
-            type="button"
-            className="btn-kid p-2 text-black hover:bg-yellow-200 transition-colors"
-            onClick={handleMenuButtonClick}
-            aria-label={`Действия для «${project.title}»`}
-            aria-haspopup="true"
-            aria-expanded={isMenuOpen}
-            title="Меню"
-          >
-            <MoreHorizontal className="w-5 h-5 sm:w-6 sm:h-6" />
-          </button>
-
-          {/* Context Dropdown Menu */}
-          {isMenuOpen && (
-            <div
-              ref={menuRef}
-              role="menu"
-              aria-label={`Меню проекта ${project.title}`}
-              onKeyDown={handleMenuKeyDown}
-              onClick={(e) => e.stopPropagation()}
-              className="absolute right-0 bottom-full mb-2 bg-white rounded-2xl border-4 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] py-1.5 px-1.5 z-30 min-w-[190px] flex flex-col gap-1"
-            >
-              <button
-                role="menuitem"
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCloseMenu();
-                  onRename(project);
-                }}
-                className="w-full text-left px-3 py-2 rounded-xl font-black text-sm text-black flex items-center gap-2 hover:bg-yellow-100 hover:text-black transition-colors"
-              >
-                <Pencil className="w-4 h-4 text-blue-600" />
-                <span>Переименовать</span>
-              </button>
-
-              <button
-                role="menuitem"
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCloseMenu();
-                  onDuplicate(project.id);
-                }}
-                className="w-full text-left px-3 py-2 rounded-xl font-black text-sm text-black flex items-center gap-2 hover:bg-yellow-100 hover:text-black transition-colors"
-              >
-                <Copy className="w-4 h-4 text-green-600" />
-                <span>Создать копию</span>
-              </button>
-
-              <div className="h-0.5 bg-gray-200 my-0.5 mx-1" />
-
-              <button
-                role="menuitem"
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCloseMenu();
-                  onDelete(project);
-                }}
-                className="w-full text-left px-3 py-2 rounded-xl font-black text-sm text-red-600 flex items-center gap-2 hover:bg-red-50 transition-colors"
-              >
-                <Trash2 className="w-4 h-4 text-red-500" />
-                <span>Удалить</span>
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+    }}>
+      <button role="menuitem" type="button" onClick={() => { restoreTrigger(); onCloseMenu(); onRename(project); }}><Pencil aria-hidden="true" className="w-5 h-5 text-blue-700" />Переименовать</button>
+      <button role="menuitem" type="button" onClick={() => { restoreTrigger(); onCloseMenu(); onDuplicate(project.id); }}><Copy aria-hidden="true" className="w-5 h-5 text-green-700" />Создать копию</button>
+      <div role="separator" className="border-t-2 border-gray-200 my-1" />
+      <button role="menuitem" type="button" className="text-red-700" onClick={() => { restoreTrigger(); onCloseMenu(); onDelete(project); }}><Trash2 aria-hidden="true" className="w-5 h-5" />Удалить</button>
+    </div>, document.body)}
+  </article>;
+});
