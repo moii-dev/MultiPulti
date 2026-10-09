@@ -49,6 +49,8 @@ export default function App() {
   const [editorInitialState, setEditorInitialState] = useState<StoredAppState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const loadGeneration = useRef(0);
 
   useEffect(() => {
     projectRepository.migrateLegacyProject().catch(() => {}).finally(() => {
@@ -57,18 +59,18 @@ export default function App() {
   }, []);
 
   const handleOpenProject = async (id: string) => {
+    const generation = ++loadGeneration.current;
+    setLoading(true);
+    setLoadError(null);
     try {
-      setLoadError(null);
       const loaded = await projectRepository.loadProject(id);
+      if (generation !== loadGeneration.current) return;
       if (!loaded) {
         setLoadError("Не удалось найти выбранный мультик");
         return;
       }
       const preferences = readPreferences();
-      const selected = loaded.frames.findIndex((f) => f.id === preferences.currentFrameId);
-      const currentIdx = selected < 0
-        ? loaded.frames.findIndex((f) => f.id === loaded.currentFrameId)
-        : selected;
+      const currentIdx = loaded.frames.findIndex((f) => f.id === loaded.currentFrameId);
 
       const state: StoredAppState = {
         history: [{ frames: loaded.frames }],
@@ -77,12 +79,15 @@ export default function App() {
         ...preferences,
       };
 
-      setActiveProject(loaded);
+      setActiveProject({ ...loaded, id: loaded.id ?? id });
       setEditorInitialState(state);
       setScreen("editor");
     } catch (err) {
+      if (generation !== loadGeneration.current) return;
       console.error("Ошибка загрузки мультика:", err);
       setLoadError(err instanceof Error ? err.message : "Ошибка загрузки мультика");
+    } finally {
+      if (generation === loadGeneration.current) setLoading(false);
     }
   };
 
@@ -91,7 +96,7 @@ export default function App() {
     setActiveProject(null);
   };
 
-  if (!ready) {
+  if (!ready || loading) {
     return (
       <div role="status" className="h-screen flex items-center justify-center font-black text-xl text-gray-700 bg-[#f0f9ff]">
         Загрузка MultiPulti…
@@ -112,6 +117,9 @@ export default function App() {
     );
   }
 
+  if (loadError) return <div role="alert" className="p-8 bg-blue-50 h-screen">
+    <p>{loadError}</p><button className="btn-kid mt-4 p-3" onClick={() => setLoadError(null)}>Мои мультики</button>
+  </div>;
   return <HomeScreen onOpenProject={handleOpenProject} />;
 }
 
@@ -187,7 +195,7 @@ function Editor({
   const { isPlaying, setIsPlaying, fps, setFps } = useAnimationPlayback(
     frames.length,
     setCurrentFrame,
-    preferences.fps ?? FPS_OPTIONS[1].fps,
+    project?.fps ?? FPS_OPTIONS[1].fps,
   );
 
   // Domain tool hooks
@@ -324,7 +332,7 @@ function Editor({
             }
             ctx.drawImage(sel.canvas, sel.x, sel.y, sel.width, sel.height);
             const newBitmap = canvas.toDataURL("image/png");
-            const updated = { ...targetFrame, bitmap: newBitmap, preview: newBitmap };
+            const updated = { ...targetFrame, bitmap: newBitmap, preview: composeFrame(canvas, targetFrame.objects) };
             currentFrames = currentFrames.map((f) => (f.id === ownerId ? updated : f));
             changed = true;
             if (baseCanvasRef.current && loadedFrameIdRef.current === ownerId) {
@@ -449,7 +457,7 @@ function Editor({
   cancelActiveGestureRef.current = canvasDrawing.cancelActiveGesture;
 
   // Persistence
-  const persistenceError = useProjectPersistence(
+  const persistence = useProjectPersistence(
     history,
     historyIndex,
     currentFrame,
@@ -458,9 +466,7 @@ function Editor({
     fps,
     persistenceEnabled,
     isPlaying,
-    project?.id,
-    project?.title,
-    project?.createdAt,
+    project!,
   );
 
   // Undo / Redo
@@ -539,18 +545,31 @@ function Editor({
     return () => window.removeEventListener("click", closeMenu);
   }, []);
 
-  const handleBackToHome = useCallback(() => {
-    commitPendingChanges();
-    onBackToHome?.();
-  }, [commitPendingChanges, onBackToHome]);
+  const [leaving, setLeaving] = useState(false);
+  const exitInProgress = useRef(false);
+  const handleBackToHome = async () => {
+    if (exitInProgress.current) return;
+    exitInProgress.current = true;
+    setLeaving(true);
+    setIsPlaying(false);
+    try {
+      await persistence.flush(commitPendingChanges());
+      onBackToHome?.();
+    } catch {
+      exitInProgress.current = false;
+      setLeaving(false);
+    }
+  };
 
   return (
     <div className="flex flex-col h-screen bg-blue-50 font-sans text-gray-800">
-      {(loadError || persistenceError || frameManager.canvasError) && (
+      {(loadError || persistence.error || frameManager.canvasError) && (
         <div role="alert" className="bg-red-100 text-red-800 px-4 py-2 text-sm">
-          {loadError || persistenceError || frameManager.canvasError}
+          {loadError || persistence.error || frameManager.canvasError}
         </div>
       )}
+      <div role="status" className="px-4 text-xs bg-white">{persistence.status}</div>
+      {leaving && <div className="fixed inset-0 z-50 bg-white/70 flex items-center justify-center font-bold" role="status">Сохранение перед выходом…</div>}
       <HeaderToolbar
         logoUrl={LOGO_URL}
         projectTitle={project?.title}

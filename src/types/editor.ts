@@ -50,6 +50,7 @@ export interface Frame {
   preview: string;
 }
 export interface Project {
+  fps?: number;
   id?: string;
   title?: string;
   version: 2;

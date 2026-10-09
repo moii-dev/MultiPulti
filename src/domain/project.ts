@@ -42,6 +42,7 @@ export function validateProject(value: unknown): Project {
     ids.add(frame.id);
   }
   if (typeof value.currentFrameId !== 'string' || !ids.has(value.currentFrameId)) throw new Error('Неизвестный текущий кадр');
+  if (value.fps !== undefined && (!finite(value.fps) || (value.fps as number) <= 0)) throw new Error('Некорректная частота кадров');
   return value as unknown as Project;
 }
 export function migrateLegacy(value: unknown): Project {
@@ -100,6 +101,7 @@ export function cloneProject(original: Project, existingTitles: string[] = []): 
 
   return {
     id: newId,
+    fps: original.fps,
     title: newTitle,
     version: 2,
     frames: newFrames,

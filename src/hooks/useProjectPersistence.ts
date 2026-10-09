@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { projectRepository, savePreferences } from '../services/projectRepository';
-import type { FrameHistoryEntry, Project } from '../types/editor';
+import { createProjectSaveSession } from '../domain/projectSaveSession';
+import type { Frame, FrameHistoryEntry, Project } from '../types/editor';
 
-/** Serial writes prevent an older transaction from winning over a newer revision. */
 export function createSaveQueue(save: (project: Project) => Promise<void>) {
   let tail = Promise.resolve();
   return (project: Project) => {
@@ -15,43 +15,63 @@ const enqueueSave = createSaveQueue(projectRepository.saveProject);
 export function useProjectPersistence(
   history: FrameHistoryEntry[], historyIndex: number, currentFrame: number,
   favoriteColors: string[], recentColors: string[], fps: number,
-  enabled: boolean, isPlaying: boolean,
-  projectId?: string,
-  projectTitle?: string,
-  createdAt?: number,
+  enabled: boolean, isPlaying: boolean, initial: Project,
 ) {
   const [error, setError] = useState<string | null>(null);
-  const [preferenceError, setPreferenceError] = useState<string | null>(null);
+  const [status, setStatus] = useState('Сохранено');
+  const [session] = useState(() => createProjectSaveSession({ ...initial, fps: initial.fps ?? fps }, enqueueSave));
   const mounted = useRef(false);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const selection = useRef(currentFrame);
   if (!isPlaying) selection.current = currentFrame;
   const frames = history[historyIndex].frames;
-  const currentFrameId = frames[currentFrame]?.id ?? frames[0]?.id;
-  // Palette and playback ticks never serialize or write the heavy document.
+  const latest = useRef(initial);
+  latest.current = { ...initial, frames, fps, currentFrameId: frames[selection.current]?.id ?? frames[0].id };
+
+  const flush = async (committed?: Frame[]) => {
+    clearTimeout(timer.current);
+    const snapshot = { ...latest.current };
+    if (committed) {
+      snapshot.frames = committed;
+      if (!committed.some(f => f.id === snapshot.currentFrameId)) snapshot.currentFrameId = committed[0].id;
+    }
+    if (mounted.current && session.dirty(snapshot)) setStatus('Сохранение…');
+    try {
+      await session.flush(snapshot);
+      if (mounted.current) { setError(null); setStatus(session.dirty(latest.current) ? 'Сохранение…' : 'Сохранено'); }
+    } catch {
+      const message = 'Ошибка сохранения. Данные остаются в редакторе. Нажмите «Мультики», чтобы повторить попытку, или продолжайте редактирование.';
+      if (mounted.current) { setError(message); setStatus('Ошибка сохранения'); }
+      throw new Error(message);
+    }
+  };
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
   useEffect(() => {
-    if (!enabled || isPlaying || !currentFrameId) return;
-    try { savePreferences({ favoriteColors, recentColors, fps, currentFrameId }); setPreferenceError(null); }
-    catch { setPreferenceError('Не удалось сохранить настройки браузера'); }
-  }, [enabled, isPlaying, currentFrameId, favoriteColors, recentColors, fps]);
+    mounted.current = true;
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (session.dirty(latest.current)) { event.preventDefault(); event.returnValue = ''; }
+    };
+    const visibility = () => { if (document.visibilityState === 'hidden' && enabled) void flushRef.current().catch(() => {}); };
+    window.addEventListener('beforeunload', beforeUnload);
+    document.addEventListener('visibilitychange', visibility);
+    return () => {
+      mounted.current = false;
+      clearTimeout(timer.current);
+      window.removeEventListener('beforeunload', beforeUnload);
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, [session, enabled]);
   useEffect(() => {
-    if (!enabled || frames.length === 0) return;
-    const timer = window.setTimeout(() => {
-      const selected = frames[Math.min(selection.current, frames.length - 1)] ?? frames[0];
-      if (!selected) return;
-      enqueueSave({
-        id: projectId,
-        title: projectTitle,
-        version: 2,
-        frames,
-        currentFrameId: selected.id,
-        createdAt,
-        updatedAt: Date.now(),
-      })
-        .then(() => { if (mounted.current) setError(null); })
-        .catch(() => { if (mounted.current) setError('Не удалось сохранить проект. Проверьте доступность и свободное место хранилища.'); });
-    }, 600);
-    return () => { window.clearTimeout(timer); };
-  }, [enabled, frames, projectId, projectTitle, createdAt]);
-  return error || preferenceError;
+    if (!enabled) return;
+    try { savePreferences({ favoriteColors, recentColors }); }
+    catch { setError('Не удалось сохранить настройки браузера'); }
+  }, [enabled, favoriteColors, recentColors]);
+  useEffect(() => {
+    if (!enabled || !session.dirty(latest.current)) return;
+    setStatus('Сохранение…');
+    timer.current = setTimeout(() => { void flushRef.current().catch(() => {}); }, 600);
+    return () => clearTimeout(timer.current);
+  }, [enabled, frames, fps, isPlaying, currentFrame, session]);
+  return { error, status, flush };
 }
