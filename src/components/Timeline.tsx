@@ -62,14 +62,6 @@ export function Timeline(props: TimelineProps) {
               </button>
             ))}
           </div>
-          <button
-            className="sm:hidden btn-kid px-2 py-1 text-xs font-black bg-gray-100 ml-1"
-            onClick={() => props.onFpsChange(props.fps === 2 ? 5 : props.fps === 5 ? 12 : 2)}
-            title="Скорость анимации"
-            aria-label={`Скорость: ${props.fps} кадров в секунду. Нажми для переключения`}
-          >
-            {props.fps} FPS
-          </button>
         </div>
         <div className="flex items-center gap-1 sm:gap-2">
           <button

@@ -189,7 +189,6 @@ function Editor({
   const [symmetryMode, setSymmetryMode] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; id: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<EditorContextMenu | null>(null);
-  const [isMobileSettingsOpen, setIsMobileSettingsOpen] = useState(false);
 
   // Playback
   const { isPlaying, setIsPlaying, fps, setFps } = useAnimationPlayback(
@@ -505,15 +504,10 @@ function Editor({
       setContextMenu(null);
       return;
     }
-    if (isMobileSettingsOpen) {
-      setIsMobileSettingsOpen(false);
-      return;
-    }
     cancelPendingChanges();
   }, [
     cancelPendingChanges,
     contextMenu,
-    isMobileSettingsOpen,
     showColorModal,
     showStickerPanel,
     showTemplatesPanel,
@@ -592,8 +586,6 @@ function Editor({
         <ToolsPanel
           tool={tool}
           hasActiveSticker={Boolean(stickerTool.activeSticker)}
-          isMobileSettingsOpen={isMobileSettingsOpen}
-          onToggleMobileSettings={() => setIsMobileSettingsOpen((prev) => !prev)}
           onSelectTool={(nextTool) => {
             playPop();
             handleSetTool(nextTool);
@@ -603,8 +595,6 @@ function Editor({
 
         <ToolSettingsPanel
           tool={tool}
-          isOpenOnMobile={isMobileSettingsOpen}
-          onCloseMobile={() => setIsMobileSettingsOpen(false)}
           activeSelection={selectionTool.activeSelection}
           activeText={textTool.activeText}
           activeSticker={stickerTool.activeSticker}

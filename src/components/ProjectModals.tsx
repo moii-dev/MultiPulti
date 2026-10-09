@@ -398,7 +398,7 @@ export function DeleteProjectModal({ project, isOpen, onClose, onConfirm }: Dele
             type="button"
             onClick={handleDelete}
             disabled={isSubmitting}
-            className="btn-kid bg-red-500 hover:bg-red-600 text-white px-5 py-2 sm:px-7 sm:py-2.5 font-black text-sm sm:text-base disabled:opacity-50"
+            className="btn-kid !bg-red-500 hover:!bg-red-600 text-white px-5 py-2 sm:px-7 sm:py-2.5 font-black text-sm sm:text-base disabled:opacity-50"
           >
             {isSubmitting ? "Удаление…" : "Удалить"}
           </button>
@@ -407,4 +407,3 @@ export function DeleteProjectModal({ project, isOpen, onClose, onConfirm }: Dele
     </div>
   );
 }
-

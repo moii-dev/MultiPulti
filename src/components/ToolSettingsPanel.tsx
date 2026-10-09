@@ -31,8 +31,6 @@ interface ToolSettingsPanelProps {
   onOpenTemplates: () => void;
   onOpenColors: () => void;
   onColorChange: (color: string) => void;
-  isOpenOnMobile?: boolean;
-  onCloseMobile?: () => void;
   onOpenStickers: () => void;
   onFinalizeSticker: () => void;
   onCancelSticker: () => void;
@@ -45,23 +43,12 @@ export function ToolSettingsPanel(props: ToolSettingsPanelProps) {
         "bg-blue-50/50 flex flex-col pt-0 pb-6 overflow-y-auto no-scrollbar shrink-0 z-30 transition-all duration-300",
         "w-48 sm:w-60",
         "hidden md:flex",
-        props.isOpenOnMobile && "!flex fixed inset-y-14 sm:inset-y-16 left-14 sm:left-[88px] w-64 bg-white/95 backdrop-blur-md border-r-4 border-black shadow-2xl z-40",
       )}
     >
       <div className="bg-white py-3 sm:py-4 px-3 sm:px-4 border-b-4 border-black mb-3 sm:mb-4 sticky top-0 z-10 shadow-sm flex items-center justify-between">
         <span className="font-black text-base sm:text-lg uppercase tracking-wider text-black">
           {props.tool === "pipette" ? "Цвет" : TOOLS.find((option) => option.id === props.tool)?.label}
         </span>
-        {props.onCloseMobile && (
-          <button
-            className="md:hidden btn-kid p-1 text-red-500"
-            onClick={props.onCloseMobile}
-            title="Закрыть настройки"
-            aria-label="Закрыть настройки инструмента"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
       </div>
       <div className="flex flex-col gap-6 px-3">
         {props.tool === "select" && (
